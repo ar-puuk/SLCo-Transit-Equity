@@ -1,0 +1,52 @@
+project:
+  type: default
+  output-dir: docs
+
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-float: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
+    number-sections: true
+    smooth-scroll: true
+    fig-width: 9
+    fig-height: 6
+    df-print: paged
+    embed-resources: true
+    css: styles.css
+
+  typst:
+    toc: true
+    number-sections: true
+    fig-width: 7
+    fig-height: 5
+    papersize: us-letter
+    margin:
+      top: 1in
+      bottom: 1in
+      left: 1in
+      right: 1in
+
+  docx:
+    toc: true
+    number-sections: true
+    fig-width: 7
+    fig-height: 5
+    reference-doc: reference.docx
+    highlight-style: arrow
+
+execute:
+  warning: false
+  message: false
+  echo: true
+  cache: true
+
+knitr:
+  opts_chunk:
+    collapse: true
+    comment: "#>"

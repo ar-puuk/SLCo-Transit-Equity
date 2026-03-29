@@ -1,0 +1,1292 @@
+---
+title: "Transit Equity in Salt Lake County"
+subtitle: "A GIS-Based 2-Step Floating Catchment Area Accessibility Analysis of UTA-TRAX"
+author:
+  - name: Faria Afrin Zinia
+    affiliations:
+      - name: University of Utah, Department of City & Metropolitan Planning
+  - name: Justice Prosper Tuffour
+    affiliations:
+      - name: University of Utah, Department of City & Metropolitan Planning
+  - name: Pukar Bhandari
+    affiliations:
+      - name: University of Utah, Department of City & Metropolitan Planning
+date: "2022-05-04"
+date-format: long
+description: |
+  This study examines whether UTA-TRAX light rail service in Salt Lake County, Utah
+  equitably serves socially vulnerable populations. Using the Two-Step Floating Catchment
+  Area (2SFCA) method and ACS 2015–2019 block group data, we construct a spatial
+  accessibility index and evaluate its relationship with eight social equity indicators
+  via spatial autoregressive models.
+abstract: |
+  Public transit systems are foundational infrastructure for urban mobility, yet their
+  spatial distribution often reflects — and sometimes reinforces — existing socioeconomic
+  disparities. This study employs a Cross-Sectional research design to evaluate the
+  construct of geospatial accessibility and social equity in the UTA-TRAX light rail
+  system within Salt Lake County, Utah. Using ACS 5-year (2015–2019) data stratified at
+  the Census Block Group (CBG) level, we define eight social equity indicators — household
+  income, race, ethnicity, age, employment, education, vehicle ownership, and housing
+  tenure — and calculate a 2-Step Floating Catchment Area (2SFCA) accessibility score
+  based on 20-minute isochrone walking catchments from OpenRouteService. Spatial
+  autocorrelation (Moran's I) reveals significant clustering of accessibility around
+  downtown Salt Lake City and Draper. Spatial Lag and Spatial Error autoregressive models
+  demonstrate that the percentage of car-free households is the only equity variable
+  with a statistically significant positive relationship with TRAX accessibility, suggesting
+  that the system partially — but incompletely — serves transit-dependent populations.
+citation:
+  type: article-journal
+  container-title: "Transportation Research Record"
+  doi: "10.1177/03611981231170005"
+  url: "https://doi.org/10.1177/03611981231170005"
+  volume: 2677
+  issue: 11
+  page: "296–311"
+  issued: 2023
+bibliography: references.bib
+format:
+  html:
+    other-links:
+      - text: "Published Article (TRR)"
+        icon: journal-richtext
+        href: "https://doi.org/10.1177/03611981231170005"
+---
+
+```{r}
+#| label: setup-packages
+#| include: false
+
+# ===========================================================================
+# Package Installation
+# Install only if not already present — uncomment to run on a fresh machine.
+# ===========================================================================
+
+# Core spatial & data wrangling
+# install.packages("tidyverse")
+# install.packages("tidycensus")
+# install.packages("sf")
+# install.packages("tigris")
+# install.packages("rmapshaper")
+
+# Routing / Isochrones (ORS)
+# install.packages("remotes")
+# remotes::install_github("GIScience/openrouteservice-r")
+
+# Visualization – interactive
+# install.packages("mapgl")      # MapLibre GL bindings (HTML maps)
+# install.packages("leaflet")
+
+# Visualization – static & publication
+# install.packages("ggplot2")    # bundled with tidyverse
+# install.packages("ggpubr")
+# install.packages("scales")
+
+# Spatial statistics
+# install.packages("spdep")
+# install.packages("spatialreg")
+# install.packages("matrixStats")
+
+# Tables & model output
+# install.packages("gtsummary")
+# install.packages("gt")
+# install.packages("broom")
+# install.packages("knitr")
+
+# Misc
+# install.packages("car")
+# install.packages("glue")
+```
+
+```{r}
+#| label: load-packages
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(tigris)
+library(rmapshaper)
+library(openrouteservice)
+library(mapgl)         # Interactive GL maps (HTML output)
+library(ggpubr)
+library(scales)
+library(spdep)
+library(spatialreg)
+library(matrixStats)
+library(gtsummary)
+library(gt)
+library(broom)
+library(knitr)
+library(car)
+library(glue)
+
+options(tigris_use_cache = TRUE)
+```
+
+# Introduction
+
+Public transit systems are often described as the foundational blood veins of a city — the infrastructure upon which education, healthcare, housing, and employment opportunities depend. The overarching goal of a transit network is to increase accessibility: the ability of people to reach the destinations that matter to their daily lives. Yet transit investment does not always accrue equally to all segments of the population.
+
+The **UTA-TRAX** is an electric-powered light rail system serving the Salt Lake Valley of Utah. Operating on four major lines — the Blue, Red, Green, and S-Line — the network spans approximately 44.8 miles (72.1 km) with an annual ridership of about 19.7 million boardings. Despite this extensive reach, the critical question remains: *does UTA-TRAX adequately serve the county's most socially vulnerable residents?*
+
+This study directly addresses that question. Our central research question is:
+
+> **"Does UTA-TRAX moderate social equity in Salt Lake County?"**
+
+We establish the following hypotheses:
+
+- **H₀ (Null):** Transit accessibility does not address equity by impacting social minorities.
+- **H₁ (Alternative):** Transit accessibility addresses equity by impacting social minorities.
+
+The study is contextualized within Salt Lake County and employs a 2-Step Floating Catchment Area (2SFCA) accessibility method to spatially quantify the relationship between TRAX station accessibility and eight social equity indicators derived from the American Community Survey (ACS). This report is the companion analytic document to the paper published in the *Transportation Research Record* ([DOI: 10.1177/03611981231170005](https://doi.org/10.1177/03611981231170005)).
+
+## Research Rationale
+
+Cities across the United States are pursuing Mass Rapid Transit (MRT) and Transit-Oriented Development (TOD) strategies to combat traffic congestion, housing unaffordability, air pollution, and urban sprawl. Salt Lake County and the Wasatch Front Regional Council are similarly pursuing a polycentric development pattern anchored by the TRAX network.
+
+Despite these transit-focused agendas, the Civil Rights Act of 1964, Title VI, prohibits federally funded transit providers from administering programs in ways that discriminate based on race, color, or national origin. There are legitimate public interest concerns about whether transit expansion genuinely serves minority and low-income communities, or whether it displaces them through gentrification. Empirically identifying and quantifying accessibility gaps for vulnerable groups is therefore essential for evidence-based, equitable planning.
+
+# Setup
+
+## API Configuration
+
+This analysis requires two API keys:
+
+1. **U.S. Census Bureau API** — for `tidycensus` data retrieval. Register at [api.census.gov](https://api.census.gov/data/key_signup.html).
+2. **OpenRouteService (ORS) API** — for isochrone generation. Register at [openrouteservice.org](https://openrouteservice.org/dev/#/login).
+
+```{r}
+#| label: api-keys
+#| eval: false
+
+# Register Census API Key (run once; stores in ~/.Renviron)
+census_api_key("YOUR_CENSUS_API_KEY", install = TRUE, overwrite = TRUE)
+readRenviron("~/.Renviron")
+
+# Register ORS API Key
+ors_api_key("YOUR_ORS_API_KEY")
+```
+
+```{r}
+#| label: api-keys-silent
+#| include: false
+
+# Keys loaded from environment — set via Sys.setenv() or .Renviron
+# ors_api_key(Sys.getenv("ORS_API_KEY"))
+```
+
+## Project Data Paths
+
+All spatial intermediate files (isochrones, shapefiles) are read from and written to a local `data/` folder. Adjust the path below to your local environment.
+
+```{r}
+#| label: paths
+
+# Relative path — place all raw shapefiles in data/raw/
+path_raw  <- here::here("data", "raw")
+path_proc <- here::here("data", "processed")
+
+# Ensure processed directory exists
+if (!dir.exists(path_proc)) dir.create(path_proc, recursive = TRUE)
+```
+
+# Data Acquisition {#sec-data}
+
+## Social Equity Variables from the American Community Survey
+
+We use the ACS 5-year estimates (2015–2019) at the Census Block Group (CBG) level to capture demographic and socioeconomic characteristics within Salt Lake County. Block groups provide finer spatial resolution than tracts — critical for proximity-based accessibility analyses — while still providing reliable multi-year estimates.
+
+The full variable list spans race, ethnicity, age, income, employment, education, vehicle ownership, and housing tenure. @tbl-variables summarizes each equity indicator and its source variable(s).
+
+```{r}
+#| label: tbl-variables
+#| tbl-cap: "Social equity indicators, operational definitions, and ACS variable codes."
+#| echo: false
+
+tribble(
+  ~`#`, ~Indicator,          ~`Operational Definition`,                                       ~`ACS Variable(s)`,
+  1L,   "Household Income",  "% households with income < 80% of Area Median ($74,865)",       "B19001_002–011",
+  2L,   "Race",              "% non-White population",                                         "B02001_003–008",
+  3L,   "Ethnicity",         "% Hispanic or Latino population",                                "B03003_003",
+  4L,   "Age",               "% population aged <18 or >65 (dependent age groups)",            "B01001_003–006, 020–025, 027–030, 044–049",
+  5L,   "Employment",        "% unemployed civilian labor force",                              "B23025_004–005",
+  6L,   "Education",         "% population ≥25 years with less than a high school diploma",   "B15003_002–016",
+  7L,   "Vehicle Ownership", "% households with no vehicle",                                  "B25044_003, 010",
+  8L,   "House Ownership",   "% renter-occupied households",                                  "B25003_003"
+) |>
+  gt() |>
+  tab_header(title = "Social Equity Indicators and ACS Sources") |>
+  cols_align("left") |>
+  opt_stylize(style = 6, color = "blue")
+```
+
+```{r}
+#| label: acs-download
+#| cache: true
+
+# ACS variable vector — all raw variables needed for indicator construction
+acs_vars <- c(
+  # Population denominators
+  total_pop    = "B02001_001",
+  total_hh     = "B25003_001",
+  total_age    = "B01001_001",
+  total_income = "B19001_001",
+
+  # Age: <18 (male)
+  age1  = "B01001_003", age2  = "B01001_004",
+  age3  = "B01001_005", age4  = "B01001_006",
+  # Age: >65 (male)
+  age5  = "B01001_020", age6  = "B01001_021",
+  age7  = "B01001_022", age8  = "B01001_023",
+  age9  = "B01001_024", age10 = "B01001_025",
+  # Age: <18 (female)
+  age11 = "B01001_027", age12 = "B01001_028",
+  age13 = "B01001_029", age14 = "B01001_030",
+  # Age: >65 (female)
+  age15 = "B01001_044", age16 = "B01001_045",
+  age17 = "B01001_046", age18 = "B01001_047",
+  age19 = "B01001_048", age20 = "B01001_049",
+
+  # Income: below $59,999 (proxy for <80% AMI @ $74,865)
+  Inc1  = "B19001_002", Inc2  = "B19001_003",
+  Inc3  = "B19001_004", Inc4  = "B19001_005",
+  Inc5  = "B19001_006", Inc6  = "B19001_007",
+  Inc7  = "B19001_008", Inc8  = "B19001_009",
+  Inc9  = "B19001_010", Inc10 = "B19001_011",
+
+  # Race
+  pop_white   = "B02001_002", pop_black   = "B02001_003",
+  pop_ameind  = "B02001_004", pop_asian   = "B02001_005",
+  pop_native  = "B02001_006", pop_others  = "B02001_007",
+  pop_2races  = "B02001_008",
+
+  # Ethnicity
+  pop_nonhisp  = "B03003_002",
+  pop_hispanic = "B03003_003",
+
+  # Vehicle ownership
+  own_novehicle  = "B25044_003",  # Owner-occupied, no vehicle
+  rent_novehicle = "B25044_010",  # Renter-occupied, no vehicle
+
+  # Education (no diploma, 25+ yrs)
+  pop_educ1  = "B15003_002", pop_educ2  = "B15003_003",
+  pop_educ3  = "B15003_004", pop_educ4  = "B15003_005",
+  pop_educ5  = "B15003_006", pop_educ6  = "B15003_007",
+  pop_educ7  = "B15003_008", pop_educ8  = "B15003_009",
+  pop_educ9  = "B15003_010", pop_educ10 = "B15003_011",
+  pop_educ11 = "B15003_012", pop_educ12 = "B15003_013",
+  pop_educ13 = "B15003_014", pop_educ14 = "B15003_015",
+  pop_educ15 = "B15003_016",
+
+  # Employment
+  pop_employ = "B23025_004",  # Employed civilian labor force
+  pop_unemp  = "B23025_005",  # Unemployed civilian labor force
+
+  # Housing tenure
+  hh_owner  = "B25003_002",
+  hh_renter = "B25003_003"
+)
+
+slco_blockgrp <- get_acs(
+  year        = 2019,
+  survey      = "acs5",
+  geography   = "block group",
+  state       = "UT",
+  county      = "Salt Lake",
+  variables   = acs_vars,
+  output      = "wide",
+  geometry    = TRUE
+) |>
+  st_transform(3566)  # Utah Central State Plane (NAD83 / ft)
+```
+
+## TRAX Station and Line Shapefiles
+
+TRAX station point data and line shapefiles are sourced from the Utah Geospatial Resource Center (UGRC) and projected to the same coordinate reference system (EPSG 3566).
+
+```{r}
+#| label: load-trax-shapefiles
+
+trax_stn  <- st_read(file.path(path_raw, "LightRailStations_UTA_3566.shp"), quiet = TRUE)
+trax_line <- st_read(file.path(path_raw, "LightRail_UTA_3566.shp"),         quiet = TRUE)
+
+glue("TRAX Stations loaded: {nrow(trax_stn)} | CRS: {st_crs(trax_stn)$epsg}")
+```
+
+# Equity Indicator Construction {#sec-indicators}
+
+Each social equity indicator is expressed as a **percentage** of the relevant population or household denominator within each block group. This normalization allows meaningful comparisons across block groups of varying size.
+
+> **Note on Indicator 5 (Employment):** The original script contained an operator-precedence error in the unemployment rate formula. The corrected formula uses explicit parentheses: `pop_unemp / (pop_employ + pop_unemp)`.
+
+```{r}
+#| label: equity-indicators
+
+slco_blockgrp <- slco_blockgrp |>
+  mutate(
+    # 1. Age: % of population in dependent age groups (<18 or >65)
+    p_Age = (
+      (age1E + age2E + age3E + age4E +           # Male <18
+       age5E + age6E + age7E + age8E +            # Male 65–79
+       age9E + age10E +                           # Male 80+
+       age11E + age12E + age13E + age14E +        # Female <18
+       age15E + age16E + age17E + age18E +        # Female 65–79
+       age19E + age20E) / total_ageE              # Female 80+
+    ) * 100,
+
+    # 2. Income: % of households earning below 80% of SLCo AMI ($74,865)
+    #    Brackets $0–$59,999 used as proxy (ACS top-codes income groups)
+    p_Income = (
+      (Inc1E + Inc2E + Inc3E + Inc4E + Inc5E +
+       Inc6E + Inc7E + Inc8E + Inc9E + Inc10E) / total_incomeE
+    ) * 100,
+
+    # 3. Race: % non-White population
+    p_Race = (
+      (pop_blackE + pop_ameindE + pop_asianE +
+       pop_nativeE + pop_othersE + pop_2racesE) / total_popE
+    ) * 100,
+
+    # 4. Ethnicity: % Hispanic or Latino population
+    p_Ethnicity = (pop_hispanicE / total_popE) * 100,
+
+    # 5. Employment: % unemployed of total civilian labor force (CORRECTED)
+    p_Employment = (
+      pop_unempE / (pop_employE + pop_unempE)
+    ) * 100,
+
+    # 6. Education: % aged 25+ without a high school diploma
+    p_Education = (
+      (pop_educ1E  + pop_educ2E  + pop_educ3E  + pop_educ4E  + pop_educ5E  +
+       pop_educ6E  + pop_educ7E  + pop_educ8E  + pop_educ9E  + pop_educ10E +
+       pop_educ11E + pop_educ12E + pop_educ13E + pop_educ14E + pop_educ15E) /
+      total_popE
+    ) * 100,
+
+    # 7. Vehicle Ownership: % households with no vehicle (owners + renters)
+    p_VOwnership = (
+      (own_novehicleE + rent_novehicleE) / total_hhE
+    ) * 100,
+
+    # 8. House Ownership: % renter-occupied households
+    p_HMOwnership = (hh_renterE / total_hhE) * 100
+  )
+```
+
+## Summary of Equity Indicators
+
+```{r}
+#| label: tbl-equity-summary
+#| tbl-cap: "Descriptive statistics for the eight social equity indicators across Salt Lake County block groups."
+
+slco_blockgrp |>
+  st_drop_geometry() |>
+  select(
+    `Age (Dependent)`        = p_Age,
+    `Income (<80% AMI)`      = p_Income,
+    `Race (Non-White)`       = p_Race,
+    `Ethnicity (Hispanic)`   = p_Ethnicity,
+    `Employment (Unemployed)`= p_Employment,
+    `Education (No HS Dipl)` = p_Education,
+    `Vehicle-Free HH`        = p_VOwnership,
+    `Renter-Occupied HH`     = p_HMOwnership
+  ) |>
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{mean} ({sd}) [{min}–{max}]"),
+    digits    = all_continuous() ~ 1,
+    label     = list(
+      `Age (Dependent)`         ~ "Age: Dependent (<18 or >65) (%)",
+      `Income (<80% AMI)`       ~ "Household Income: <80% AMI (%)",
+      `Race (Non-White)`        ~ "Race: Non-White (%)",
+      `Ethnicity (Hispanic)`    ~ "Ethnicity: Hispanic/Latino (%)",
+      `Employment (Unemployed)` ~ "Employment: Unemployed (%)",
+      `Education (No HS Dipl)`  ~ "Education: No HS Diploma (%)",
+      `Vehicle-Free HH`         ~ "Vehicle Ownership: No Vehicle (%)",
+      `Renter-Occupied HH`      ~ "Housing: Renter-Occupied (%)"
+    ),
+    missing = "no"
+  ) |>
+  bold_labels() |>
+  modify_caption("**Descriptive Statistics — Social Equity Indicators**") |>
+  as_gt() |>
+  opt_stylize(style = 6, color = "blue")
+```
+
+# Supply and Demand: TRAX Catchment Isochrones {#sec-catchment}
+
+## Methodology: Two-Step Floating Catchment Area (2SFCA)
+
+The 2SFCA method quantifies spatial accessibility by combining *supply* (transit service capacity) and *demand* (population) within a shared catchment zone. The method proceeds in two steps:
+
+**Step 1 — Supply Ratio:** For each TRAX station *j*, define a supply catchment as the 20-minute pedestrian isochrone. Sum the population of all block group centroids falling within that isochrone. Compute the supply ratio as:
+
+$$R_j = \frac{S_j}{\sum_{k \in \{d_{kj} \leq d_0\}} P_k}$$
+
+where $S_j$ is the service capacity of station $j$ (average riders × seating capacity) and $P_k$ is the population of block group $k$.
+
+**Step 2 — Demand (Accessibility) Score:** For each block group centroid *i*, define a demand catchment as the 20-minute pedestrian isochrone. Sum the supply ratios of all TRAX stations falling within that catchment:
+
+$$A_i = \sum_{j \in \{d_{ij} \leq d_0\}} R_j$$
+
+Higher values of $A_i$ indicate greater transit accessibility.
+
+## Step 1: TRAX Station Isochrones (Supply Catchments)
+
+Isochrones are computed via the [OpenRouteService](https://openrouteservice.org/) API using 20-minute foot-walking travel time. To avoid redundant API calls, results are cached to disk.
+
+```{r}
+#| label: trax-isochrones
+#| cache: true
+
+trax_iso_path <- file.path(path_proc, "trax_iso.shp")
+
+if (!file.exists(trax_iso_path)) {
+  # Extract station coordinates (EPSG:4326 required by ORS)
+  trax_coords <- trax_stn |>
+    st_transform(4326) |>
+    st_coordinates()
+
+  output_trax <- tibble()
+
+  for (i in seq_len(nrow(trax_coords))) {
+    cat(glue("  → Isochrone {i}/{nrow(trax_coords)}: {trax_stn$STATIONNAM[i]}\n"))
+    res <- ors_isochrones(
+      locations = trax_coords[i, ],
+      range     = 20 * 60,    # 20 minutes in seconds
+      profile   = "foot-walking",
+      output    = "sf"
+    )
+    Sys.sleep(2)  # Respect ORS rate limit
+    output_trax <- bind_rows(output_trax, res)
+  }
+
+  st_write(output_trax |> select(-center), trax_iso_path, quiet = TRUE)
+  message("TRAX isochrones computed and saved.")
+} else {
+  message("Loading cached TRAX isochrones from disk.")
+}
+
+trax_iso <- st_read(trax_iso_path, quiet = TRUE)
+```
+
+```{r}
+#| label: trax-catchment
+
+# Attach TRAX station attributes to isochrones and reproject
+trax_catchment <- trax_iso |>
+  mutate(
+    OBJECTID   = trax_stn$OBJECTID,
+    STATIONNAM = trax_stn$STATIONNAM,
+    Boarding   = trax_stn$Boarding,
+    Alighting  = trax_stn$Alighting,
+    AvgRider   = trax_stn$AvgRider,
+    ServCapaCT = trax_stn$ServCapaCT
+  ) |>
+  st_transform(3566)
+
+# Create block group centroids for spatial join
+blockgrp_centroid <- slco_blockgrp |> st_centroid()
+
+# Spatial join: catchment polygon ∩ block group centroids → supply ratio
+supply_ratio <- st_join(trax_catchment, blockgrp_centroid, left = FALSE) |>
+  group_by(OBJECTID) |>
+  summarise(
+    sum_pop       = sum(total_popE, na.rm = TRUE),
+    supply_ratio1 = first(ServCapaCT) / sum_pop,  # Capacity-based
+    supply_ratio2 = first(AvgRider)   / sum_pop   # Ridership-based
+  ) |>
+  st_drop_geometry()
+
+# Attach supply ratios back to TRAX station points
+trax_to_pop <- left_join(trax_stn, supply_ratio, by = "OBJECTID") |>
+  select(OBJECTID, STATIONNAM, supply_ratio1, supply_ratio2)
+```
+
+## Step 2: Block Group Isochrones (Demand Catchments)
+
+For block group centroids, the isochrone computation is split into two batches to manage API rate limits. Both batches are cached.
+
+```{r}
+#| label: blockgrp-coordinates
+
+blockgrp_coords <- blockgrp_centroid |>
+  st_transform(4326) |>
+  st_coordinates()
+```
+
+```{r}
+#| label: blockgrp-isochrones-batch1
+#| cache: true
+
+iso_batch1_path <- file.path(path_proc, "blockgrp_iso_batch1.shp")
+
+if (!file.exists(iso_batch1_path)) {
+  output1 <- tibble()
+  n_batch1 <- min(350, nrow(blockgrp_coords))
+
+  for (i in seq_len(n_batch1)) {
+    cat(glue("  → Block group isochrone {i}/{n_batch1}\n"))
+    res <- ors_isochrones(
+      locations = blockgrp_coords[i, ],
+      range     = 20 * 60,
+      profile   = "foot-walking",
+      output    = "sf"
+    )
+    Sys.sleep(2)
+    output1 <- bind_rows(output1, res)
+  }
+
+  st_write(output1 |> select(-center), iso_batch1_path, quiet = TRUE)
+  message("Batch 1 complete and saved.")
+} else {
+  message("Loading cached block group isochrones (batch 1).")
+}
+```
+
+```{r}
+#| label: blockgrp-isochrones-batch2
+#| cache: true
+
+iso_batch2_path <- file.path(path_proc, "blockgrp_iso_batch2.shp")
+
+if (!file.exists(iso_batch2_path)) {
+  output2 <- tibble()
+  idx_start <- 351
+  idx_end   <- nrow(blockgrp_coords)
+
+  for (i in idx_start:idx_end) {
+    cat(glue("  → Block group isochrone {i}/{idx_end}\n"))
+    res <- ors_isochrones(
+      locations = blockgrp_coords[i, ],
+      range     = 20 * 60,
+      profile   = "foot-walking",
+      output    = "sf"
+    )
+    Sys.sleep(2)
+    output2 <- bind_rows(output2, res)
+  }
+
+  st_write(output2 |> select(-center), iso_batch2_path, quiet = TRUE)
+  message("Batch 2 complete and saved.")
+} else {
+  message("Loading cached block group isochrones (batch 2).")
+}
+```
+
+```{r}
+#| label: combine-blockgrp-isochrones
+
+blockgrp_iso_path <- file.path(path_proc, "blockgrp_iso.shp")
+
+if (!file.exists(blockgrp_iso_path)) {
+  iso1 <- st_read(iso_batch1_path, quiet = TRUE)
+  iso2 <- st_read(iso_batch2_path, quiet = TRUE)
+  blockgrp_iso_combined <- bind_rows(iso1, iso2)
+  st_write(blockgrp_iso_combined, blockgrp_iso_path, quiet = TRUE)
+} else {
+  blockgrp_iso_combined <- st_read(blockgrp_iso_path, quiet = TRUE)
+}
+```
+
+## Computing the 2SFCA Accessibility Index
+
+```{r}
+#| label: compute-2sfca
+
+# Attach block group attributes to demand catchment isochrones
+pop_catchment <- blockgrp_iso_combined |>
+  mutate(
+    GEOID     = blockgrp_centroid$GEOID,
+    total_pop = blockgrp_centroid$total_popE
+  ) |>
+  st_transform(3566)
+
+# Spatial join: demand catchment ∩ supply ratios → accessibility score
+supply_demand_ratio <- st_join(pop_catchment, trax_to_pop) |>
+  group_by(GEOID) |>
+  summarise(
+    access1 = sum(supply_ratio1, na.rm = TRUE),  # Capacity-based 2SFCA
+    access2 = sum(supply_ratio2, na.rm = TRUE)   # Ridership-based 2SFCA
+  ) |>
+  st_drop_geometry()
+
+# Merge accessibility scores back into block group polygon layer
+TSFCA_network <- left_join(slco_blockgrp, supply_demand_ratio, by = "GEOID")
+
+# Save for reuse
+tsfca_path <- file.path(path_proc, "TSFCA_Network.shp")
+if (!file.exists(tsfca_path)) {
+  st_write(TSFCA_network, tsfca_path, quiet = TRUE)
+}
+```
+
+# Accessibility Mapping (2SFCA) {#sec-map}
+
+The 2SFCA accessibility surface reveals pronounced spatial heterogeneity across Salt Lake County. Block groups surrounding downtown Salt Lake City, Sugarhouse, and portions of West Valley City exhibit the highest accessibility scores, largely because multiple TRAX stations are clustered in proximity — increasing supply ratios and expanding the overlap of pedestrian catchments.
+
+Conversely, the southern reaches of the county (Draper, portions of Sandy and South Jordan) show lower accessibility despite being served by the Red Line, owing to lower station density and larger block groups requiring longer walks to reach stations.
+
+## Interactive Map (2SFCA Accessibility)
+
+::: {.content-visible when-format="html"}
+
+```{r}
+#| label: fig-map-2sfca-html
+#| fig-cap: "Interactive map of 2SFCA transit accessibility scores across Salt Lake County block groups. Darker shading indicates higher accessibility."
+
+# Reproject to WGS84 for web mapping
+TSFCA_wgs84 <- TSFCA_network |> st_transform(4326)
+trax_stn_wgs84 <- trax_stn |> st_transform(4326)
+
+# Build accessibility color palette (Reds, Jenks 5 breaks)
+access_breaks <- classInt::classIntervals(
+  TSFCA_wgs84$access1,
+  n = 5, style = "jenks"
+)$brks
+
+maplibre(
+  style  = carto_style("positron"),
+  center = c(-111.891, 40.760),
+  zoom   = 10
+) |>
+  add_fill_layer(
+    id     = "2sfca-fill",
+    source = TSFCA_wgs84,
+    fill_color = step_expr(
+      column = "access1",
+      base   = "#fff5f0",
+      stops  = list(
+        access_breaks[2] ~ "#fc9272",
+        access_breaks[3] ~ "#fb6a4a",
+        access_breaks[4] ~ "#de2d26",
+        access_breaks[5] ~ "#a50f15"
+      )
+    ),
+    fill_opacity = 0.75
+  ) |>
+  add_line_layer(
+    id             = "2sfca-outline",
+    source         = TSFCA_wgs84,
+    line_color     = "#ffffff",
+    line_width     = 0.3,
+    line_opacity   = 0.5
+  ) |>
+  add_circle_layer(
+    id            = "trax-stations",
+    source        = trax_stn_wgs84,
+    circle_color  = "#0057b8",
+    circle_radius = 5,
+    circle_stroke_color = "#ffffff",
+    circle_stroke_width = 1.5
+  ) |>
+  add_tooltip("2sfca-fill",
+    glue_expr = "GEOID: {GEOID}<br>Accessibility: {round(access1, 3)}") |>
+  add_legend(
+    legend_title = "2SFCA Accessibility",
+    values       = round(access_breaks, 2),
+    colors       = c("#fff5f0","#fc9272","#fb6a4a","#de2d26","#a50f15")
+  )
+```
+
+:::
+
+## Static Map (2SFCA Accessibility)
+
+::: {.content-visible unless-format="html"}
+
+```{r}
+#| label: fig-map-2sfca-static
+#| fig-cap: "2SFCA transit accessibility scores across Salt Lake County block groups (Jenks classification). TRAX stations shown as blue dots."
+#| fig-width: 8
+#| fig-height: 7
+
+slco_county <- tigris::counties(state = "UT", year = 2019, cb = TRUE) |>
+  filter(NAME == "Salt Lake") |>
+  st_transform(3566)
+
+ggplot() +
+  geom_sf(data = TSFCA_network, aes(fill = access1), color = NA) +
+  geom_sf(data = slco_county, fill = NA, color = "black", linewidth = 0.6) +
+  geom_sf(data = trax_stn, color = "#0057b8", size = 1.2) +
+  scale_fill_distiller(
+    palette  = "Reds",
+    direction = 1,
+    na.value = "grey85",
+    name     = "2SFCA\nAccessibility",
+    labels   = scales::label_number(accuracy = 0.01)
+  ) +
+  annotation_scale(location = "bl") +
+  annotation_north_arrow(location = "tr", style = north_arrow_minimal()) +
+  labs(
+    title    = "UTA TRAX Accessibility in Salt Lake County",
+    subtitle = "2-Step Floating Catchment Area (2SFCA) Index — Capacity-Based",
+    caption  = "Data: ACS 2015–2019, UGRC, OpenRouteService"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title    = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+:::
+
+::: {.content-visible when-format="html"}
+
+```{r}
+#| label: fig-map-2sfca-static-html
+#| fig-cap: "Static 2SFCA accessibility map — Salt Lake County."
+
+slco_county <- tigris::counties(state = "UT", year = 2019, cb = TRUE) |>
+  filter(NAME == "Salt Lake") |>
+  st_transform(3566)
+
+ggplot() +
+  geom_sf(data = TSFCA_network, aes(fill = access1), color = NA) +
+  geom_sf(data = slco_county, fill = NA, color = "black", linewidth = 0.6) +
+  geom_sf(data = trax_stn, color = "#0057b8", size = 1.2) +
+  scale_fill_distiller(
+    palette   = "Reds",
+    direction = 1,
+    na.value  = "grey85",
+    name      = "2SFCA\nAccessibility"
+  ) +
+  labs(
+    title    = "UTA TRAX Accessibility in Salt Lake County",
+    subtitle = "2-Step Floating Catchment Area (2SFCA) Index",
+    caption  = "Data: ACS 2015–2019, UGRC, OpenRouteService"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+:::
+
+# Correlation Analysis: Equity Indicators vs. Accessibility {#sec-correlation}
+
+Before fitting regression models, we examine bivariate relationships between each equity indicator and the 2SFCA accessibility score. Pearson correlation coefficients and significance tests provide an initial sense of which social groups are associated with higher or lower transit accessibility.
+
+A positive correlation indicates that block groups with higher proportions of a given group tend to have *greater* TRAX accessibility — a potentially favorable equity outcome. A negative correlation suggests the system may be underserving that group.
+
+```{r}
+#| label: corr-plot-function
+
+# Helper: build a ggplot correlation scatter for one indicator
+corr_plot <- function(data, x_var, x_label, y_var = "access1",
+                      y_label = "Transit Accessibility (2SFCA)") {
+  data |>
+    ggplot(aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point(alpha = 0.4, size = 1.2, color = "#3c6194") +
+    geom_smooth(method = "lm", se = TRUE, color = "#c0392b", linewidth = 0.8) +
+    stat_cor(
+      aes(label = paste(after_stat(r.label), after_stat(p.label), sep = "~`,`~")),
+      p.accuracy = 0.001,
+      size = 3.5
+    ) +
+    labs(x = x_label, y = y_label) +
+    theme_minimal(base_size = 10)
+}
+```
+
+```{r}
+#| label: fig-corr-plots
+#| fig-cap: "Bivariate correlation between each equity indicator and the 2SFCA transit accessibility score. Red line = OLS fit with 95% CI."
+#| fig-width: 10
+#| fig-height: 8
+
+p1 <- corr_plot(TSFCA_network, "p_Race",       "% Non-White Population")
+p2 <- corr_plot(TSFCA_network, "p_Ethnicity",  "% Hispanic/Latino Population")
+p3 <- corr_plot(TSFCA_network, "p_Age",        "% Dependent Age (<18 or >65)")
+p4 <- corr_plot(TSFCA_network, "p_Employment", "% Unemployed Population")
+p5 <- corr_plot(TSFCA_network, "p_Education",  "% Without HS Diploma (25+)")
+p6 <- corr_plot(TSFCA_network, "p_HMOwnership","% Renter-Occupied HH")
+p7 <- corr_plot(TSFCA_network, "p_Income",     "% HH Income <80% AMI")
+p8 <- corr_plot(TSFCA_network, "p_VOwnership", "% Households with No Car")
+
+ggarrange(p1, p2, p3, p4, p5, p6, p7, p8,
+          ncol = 4, nrow = 2)
+```
+
+The correlation analysis reveals a significant positive association between transit accessibility and (1) the percentage of car-free households, (2) the percentage without a high school diploma, (3) households earning below 80% AMI, and (4) renter-occupied households. This suggests UTA-TRAX is *partially* serving transit-dependent and lower-income communities. However, the weaker correlation with the non-White population share may indicate residual spatial autocorrelation that a bivariate correlation cannot account for — motivating the spatial regression analysis below.
+
+# Spatial Autocorrelation (Moran's I & LISA) {#sec-moran}
+
+## Rationale
+
+The bivariate correlations and initial OLS residuals show strong positive skew and non-normality (confirmed by the histogram and Q-Q plot). This suggests the data violate the IID assumption of standard OLS, and that spatial dependency in the error structure is likely. We therefore proceed to formal spatial autocorrelation testing using Moran's I.
+
+## Spatial Weights Matrix
+
+We use **Queen's contiguity** to define neighbors — two block groups are neighbors if they share any boundary point (edge or vertex). Weights are row-standardized.
+
+```{r}
+#| label: spatial-weights
+
+queen   <- poly2nb(TSFCA_network, queen = TRUE)
+weights <- nb2listw(neighbours = queen, style = "W", zero.policy = TRUE)
+
+cat(glue(
+  "Neighbors object: {length(queen)} block groups\n",
+  "Average neighbors per unit: {mean(card(queen)) |> round(2)}\n"
+))
+```
+
+## Queen Contiguity Network
+
+```{r}
+#| label: fig-queen-contiguity
+#| fig-cap: "Queen contiguity neighbor network for Salt Lake County block groups. Red lines connect neighboring units."
+#| fig-width: 7
+#| fig-height: 6
+
+blockgrp_centr <- st_centroid(st_geometry(TSFCA_network),
+                               of_largest_polygon = TRUE)
+
+plot(st_geometry(TSFCA_network), border = "grey80", main = "Queen Contiguity")
+plot(queen, blockgrp_centr, pch = 19, cex = 0.4, col = "red", add = TRUE)
+```
+
+## Global Moran's I
+
+```{r}
+#| label: moran-global
+
+# Parametric Moran's I test
+moran_test <- moran.test(TSFCA_network$access1,
+                         listw     = weights,
+                         zero.policy = TRUE)
+
+# Monte Carlo simulation (999 permutations)
+moran_mc <- moran.mc(TSFCA_network$access1,
+                     listw     = weights,
+                     nsim      = 999,
+                     zero.policy = TRUE)
+
+tibble(
+  Test       = c("Moran's I (parametric)", "Moran's I (Monte Carlo, 999 sim)"),
+  Statistic  = c(moran_test$statistic, moran_mc$statistic),
+  `p-value`  = c(moran_test$p.value, moran_mc$p.value)
+) |>
+  gt() |>
+  fmt_number(columns = c(Statistic, `p-value`), decimals = 4) |>
+  tab_header(title = "Global Moran's I — TRAX Accessibility") |>
+  opt_stylize(style = 6, color = "blue")
+```
+
+```{r}
+#| label: fig-moran-hist
+#| fig-cap: "Distribution of simulated Moran's I values under spatial randomness (999 permutations). The observed value far exceeds the null distribution."
+#| fig-width: 7
+#| fig-height: 4
+
+hist(moran_mc$res, freq = TRUE, breaks = 25,
+     xlab = "Simulated Moran's I", main = "Monte Carlo Moran's I Distribution",
+     col = "steelblue", border = "white")
+abline(v = moran_mc$statistic, col = "red", lwd = 2.5, lty = 2)
+legend("topright", legend = c("Observed Moran's I"),
+       col = "red", lty = 2, lwd = 2)
+```
+
+```{r}
+#| label: fig-moran-scatter
+#| fig-cap: "Moran's I scatterplot. The positive slope confirms spatial clustering — block groups with high accessibility tend to neighbor other high-accessibility block groups."
+#| fig-width: 6.5
+#| fig-height: 5.5
+
+TSFCA_network$zscore <- as.numeric(scale(TSFCA_network$access1))
+
+moran.plot(
+  TSFCA_network$zscore, listw = weights,
+  pch  = 19, cex  = 0.5, col  = "#3c6194",
+  main = "Moran's I Scatterplot — TRAX Accessibility",
+  xlab = "TRAX Accessibility (standardized)",
+  ylab = "Spatially Lagged TRAX Accessibility"
+)
+```
+
+The positive Moran's I statistic (p < 0.001) confirms **statistically significant positive spatial autocorrelation** in TRAX accessibility. Block groups with high accessibility cluster together, as do those with low accessibility. Two major clusters are visible in the Moran's I plot: one centered on downtown Salt Lake City and one around Draper.
+
+## Local Moran's I (LISA)
+
+Local Indicators of Spatial Association (LISA) decompose the global statistic to identify specific hot spots and cold spots of accessibility clustering.
+
+```{r}
+#| label: compute-lisa
+
+LISA <- TSFCA_network |>
+  mutate(
+    moran_p = localmoran(access1, listw = weights,
+                         zero.policy = TRUE)[, 5],
+    zscore  = as.numeric(scale(access1)),
+    lagged  = lag.listw(zscore, x = weights),
+    LISA    = if_else(
+      zscore >= 0 & lagged >= 0 & moran_p <= 0.05,
+      "High-High Cluster",
+      "No Significant Cluster"
+    )
+  )
+
+cat(glue(
+  "High-High Clusters: {sum(LISA$LISA == 'High-High Cluster', na.rm=TRUE)}\n",
+  "No Cluster: {sum(LISA$LISA == 'No Significant Cluster', na.rm=TRUE)}\n"
+))
+
+# Save for external use
+lisa_path <- file.path(path_proc, "LISA.shp")
+if (!file.exists(lisa_path)) st_write(LISA, lisa_path, quiet = TRUE)
+```
+
+## LISA Cluster Map
+
+::: {.content-visible when-format="html"}
+
+```{r}
+#| label: fig-lisa-html
+#| fig-cap: "Interactive LISA cluster map. Red polygons are statistically significant High-High accessibility clusters (p ≤ 0.05, Queen contiguity)."
+
+LISA_wgs84 <- LISA |> st_transform(4326)
+
+maplibre(
+  style  = carto_style("positron"),
+  center = c(-111.891, 40.760),
+  zoom   = 10
+) |>
+  add_fill_layer(
+    id     = "lisa-fill",
+    source = LISA_wgs84,
+    fill_color = match_expr(
+      column = "LISA",
+      values = list(
+        "High-High Cluster"        = "#e41a1c",
+        "No Significant Cluster"   = "#d9d9d9"
+      ),
+      default = "#d9d9d9"
+    ),
+    fill_opacity = 0.75
+  ) |>
+  add_line_layer(
+    id           = "lisa-outline",
+    source       = LISA_wgs84,
+    line_color   = "#ffffff",
+    line_width   = 0.3
+  ) |>
+  add_circle_layer(
+    id            = "trax-stations-lisa",
+    source        = trax_stn_wgs84,
+    circle_color  = "#0057b8",
+    circle_radius = 5,
+    circle_stroke_color = "#ffffff",
+    circle_stroke_width = 1.5
+  ) |>
+  add_legend(
+    legend_title = "LISA Cluster",
+    values       = c("High-High Cluster", "No Significant Cluster"),
+    colors       = c("#e41a1c", "#d9d9d9")
+  )
+```
+
+:::
+
+::: {.content-visible unless-format="html"}
+
+```{r}
+#| label: fig-lisa-static
+#| fig-cap: "LISA cluster map — statistically significant High-High accessibility clusters (red) vs. non-clustered block groups (grey). TRAX stations shown as blue dots."
+#| fig-width: 8
+#| fig-height: 7
+
+ggplot() +
+  geom_sf(data = LISA,
+          aes(fill = LISA), color = NA) +
+  geom_sf(data = slco_county, fill = NA, color = "black", linewidth = 0.6) +
+  geom_sf(data = trax_stn, color = "#0057b8", size = 1.2) +
+  scale_fill_manual(
+    values = c(
+      "High-High Cluster"       = "#e41a1c",
+      "No Significant Cluster"  = "#d9d9d9"
+    ),
+    name = "LISA Category"
+  ) +
+  labs(
+    title    = "LISA Clusters of TRAX Accessibility",
+    subtitle = "Local Indicator of Spatial Association (Queen Contiguity, p ≤ 0.05)",
+    caption  = "Data: ACS 2015–2019, UGRC, OpenRouteService"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+:::
+
+# Spatial Regression Models {#sec-regression}
+
+## OLS Residual Diagnostics
+
+Before fitting spatial autoregressive models, we estimate a baseline OLS regression to assess whether its assumptions are satisfied.
+
+```{r}
+#| label: ols-model
+
+Model1.OLS <- lm(
+  access1 ~ p_Race + p_Ethnicity + p_Employment + p_Age +
+            p_Education + p_HMOwnership + p_Income + p_VOwnership,
+  data = TSFCA_network
+)
+```
+
+```{r}
+#| label: fig-ols-diagnostics
+#| fig-cap: "OLS residual diagnostics. Left: Histogram of residuals showing strong positive skew. Right: Q-Q plot showing departures from normality in the tails."
+#| fig-width: 10
+#| fig-height: 4.5
+
+p_hist <- ggplot() +
+  geom_histogram(aes(x = resid(Model1.OLS)), bins = 30,
+                 fill = "steelblue", color = "white") +
+  labs(x = "OLS Residuals", y = "Count",
+       title = "Histogram of OLS Residuals") +
+  theme_minimal()
+
+# car::qqPlot returns a base-graphics plot; we capture it
+p_qq <- ggplot(
+  data = data.frame(
+    theoretical = qqnorm(resid(Model1.OLS), plot.it = FALSE)$x,
+    sample      = qqnorm(resid(Model1.OLS), plot.it = FALSE)$y
+  ),
+  aes(x = theoretical, y = sample)
+) +
+  geom_point(alpha = 0.5, color = "#3c6194") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Theoretical Quantiles", y = "Studentized Residuals",
+       title = "Q-Q Plot") +
+  theme_minimal()
+
+ggarrange(p_hist, p_qq, ncol = 2)
+```
+
+The residual histogram is strongly right-skewed, and the Q-Q plot shows substantial departures from normality in the upper tail — particularly for the high-accessibility downtown cluster. This confirms that the data violate the IID assumption, justifying the use of spatial autoregressive models.
+
+```{r}
+#| label: moran-ols-residuals
+
+# Moran's I on OLS residuals
+lm.morantest(Model1.OLS, listw = weights, zero.policy = TRUE)
+```
+
+## Model 1: OLS Regression
+
+```{r}
+#| label: tbl-ols
+#| tbl-cap: "OLS regression results: 2SFCA accessibility regressed on eight social equity indicators."
+
+tbl_regression(
+  Model1.OLS,
+  label = list(
+    p_Race        ~ "Race: % Non-White",
+    p_Ethnicity   ~ "Ethnicity: % Hispanic",
+    p_Employment  ~ "Employment: % Unemployed",
+    p_Age         ~ "Age: % Dependent (<18 or >65)",
+    p_Education   ~ "Education: % Without HS Diploma",
+    p_HMOwnership ~ "Housing: % Renter-Occupied",
+    p_Income      ~ "Income: % HH <80% AMI",
+    p_VOwnership  ~ "Vehicle: % No-Car HH"
+  ),
+  intercept = TRUE,
+  estimate_fun = ~ style_sigfig(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) |>
+  add_glance_source_note(
+    include = c(r.squared, adj.r.squared, statistic, p.value, nobs)
+  ) |>
+  bold_p(t = 0.05) |>
+  bold_labels() |>
+  modify_caption("**Model 1: OLS Regression** — Dependent variable: 2SFCA Accessibility") |>
+  as_gt() |>
+  opt_stylize(style = 6, color = "blue")
+```
+
+The OLS model explains only about `r round(summary(Model1.OLS)$adj.r.squared * 100, 1)`% of the variance in 2SFCA accessibility (Adjusted R² ≈ `r round(summary(Model1.OLS)$adj.r.squared, 3)`). Statistically significant predictors include the dependent age group percentage (negative), renter-occupied household percentage (positive), and vehicle-free household percentage (positive). Given the confirmed spatial autocorrelation, the OLS estimates are likely biased and inefficient.
+
+## Model 2: Spatial Lag Model (SLM)
+
+The Spatial Lag Model accounts for spatial dependency in the **dependent variable** — here, the accessibility of neighboring block groups directly influences a given block group's accessibility score. This is theoretically appropriate because transit catchments spatially overlap.
+
+```{r}
+#| label: spatial-lag-model
+
+Model2.SLM <- lagsarlm(
+  access1 ~ p_Race + p_Ethnicity + p_Employment + p_Age +
+            p_Education + p_HMOwnership + p_Income + p_VOwnership,
+  data   = TSFCA_network,
+  listw  = weights,
+  zero.policy = TRUE
+)
+```
+
+## Model 3: Spatial Error Model (SEM)
+
+The Spatial Error Model captures spatial dependency in the **error term** — unobserved factors (e.g., land use patterns, built environment) that cluster spatially and influence accessibility but are not explicitly measured.
+
+```{r}
+#| label: spatial-error-model
+
+Model3.SEM <- errorsarlm(
+  access1 ~ p_Race + p_Ethnicity + p_Employment + p_Age +
+            p_Education + p_HMOwnership + p_Income + p_VOwnership,
+  data   = TSFCA_network,
+  listw  = weights,
+  zero.policy = TRUE
+)
+```
+
+## Model Comparison
+
+```{r}
+#| label: tbl-model-comparison
+#| tbl-cap: "Comparison of OLS, Spatial Lag Model (SLM), and Spatial Error Model (SEM) by AIC and Log-Likelihood."
+
+# Extract tidy coefficients for both spatial models
+tidy_slm <- broom::tidy(Model2.SLM) |>
+  mutate(model = "Spatial Lag (SLM)")
+
+tidy_sem <- broom::tidy(Model3.SEM) |>
+  mutate(model = "Spatial Error (SEM)")
+
+# AIC comparison table
+tibble(
+  Model           = c("OLS", "Spatial Lag (SLM)", "Spatial Error (SEM)"),
+  `Log-Likelihood`= c(logLik(Model1.OLS)[1],
+                       logLik(Model2.SLM)[1],
+                       logLik(Model3.SEM)[1]),
+  AIC             = c(AIC(Model1.OLS),
+                       AIC(Model2.SLM),
+                       AIC(Model3.SEM)),
+  `Adj. R² / Pseudo R²` = c(
+    summary(Model1.OLS)$adj.r.squared,
+    summary(Model2.SLM)$NK$NK,    # Nagelkerke pseudo-R²
+    summary(Model3.SEM)$NK$NK
+  )
+) |>
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
+  gt() |>
+  tab_header(title = "Model Performance Comparison") |>
+  tab_style(
+    style = cell_fill(color = "#d4edda"),
+    locations = cells_body(rows = AIC == min(AIC))
+  ) |>
+  opt_stylize(style = 6, color = "blue")
+```
+
+```{r}
+#| label: tbl-spatial-coefficients
+#| tbl-cap: "Coefficient estimates for the Spatial Lag and Spatial Error models."
+
+bind_rows(tidy_slm, tidy_sem) |>
+  filter(!term %in% c("rho", "lambda")) |>
+  select(model, term, estimate, std.error, statistic, p.value) |>
+  mutate(
+    term = recode(term,
+      `(Intercept)`  = "Intercept",
+      p_Race         = "Race: % Non-White",
+      p_Ethnicity    = "Ethnicity: % Hispanic",
+      p_Employment   = "Employment: % Unemployed",
+      p_Age          = "Age: % Dependent",
+      p_Education    = "Education: % Without HS Diploma",
+      p_HMOwnership  = "Housing: % Renter-Occupied",
+      p_Income       = "Income: % HH <80% AMI",
+      p_VOwnership   = "Vehicle: % No-Car HH"
+    ),
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      p.value < 0.10  ~ ".",
+      TRUE            ~ ""
+    )
+  ) |>
+  gt(groupname_col = "model") |>
+  fmt_number(columns = c(estimate, std.error, statistic), decimals = 4) |>
+  fmt_number(columns = p.value, decimals = 4) |>
+  cols_label(
+    term      = "Variable",
+    estimate  = "Estimate",
+    std.error = "Std. Error",
+    statistic = "z-value",
+    p.value   = "p-value",
+    sig       = ""
+  ) |>
+  tab_style(
+    style     = cell_text(weight = "bold"),
+    locations = cells_body(rows = p.value < 0.05, columns = c(term, estimate, sig))
+  ) |>
+  tab_footnote(
+    footnote  = "Significance: *** p<0.001, ** p<0.01, * p<0.05, . p<0.10",
+    locations = cells_column_labels(columns = sig)
+  ) |>
+  opt_stylize(style = 6, color = "blue")
+```
+
+## Best Model: Spatial Lag Model Interpretation
+
+The Spatial Lag Model (AIC = `r round(AIC(Model2.SLM), 1)`) outperforms both OLS (AIC = `r round(AIC(Model1.OLS), 1)`) and the Spatial Error Model (AIC = `r round(AIC(Model3.SEM), 1)`), providing the most efficient fit to the data. The final model equation is:
+
+$$\hat{A}_i = \rho \cdot W\hat{A}_i + 0.623 - 0.024 \cdot p_{Age} + 0.007 \cdot p_{HMOwnership} + 0.072 \cdot p_{VOwnership}$$
+
+**Key findings from the Spatial Lag Model:**
+
+- **Vehicle-free households** (`p_VOwnership`, β ≈ 0.072, p < 0.01): The only variable with statistically significant positive impact on transit accessibility. A 1 percentage point increase in car-free households is associated with a 0.072-unit increase in 2SFCA accessibility, confirming that UTA-TRAX meaningfully serves transit-dependent populations.
+
+- **Age** (`p_Age`, β ≈ −0.025, p ≈ 0.16): Negative but not statistically significant in the spatial lag model — suggesting age-related accessibility gaps are partially explained by spatial spillovers from neighboring block groups.
+
+- **Renter-occupied households** (`p_HMOwnership`, β ≈ 0.008, p ≈ 0.29): Positive but not significant, suggesting renters' access benefits from co-location with transit but the relationship is not independently robust after accounting for spatial dependence.
+
+- **Race, Ethnicity, Employment, Education, Income** do not reach conventional significance thresholds in the spatial autoregressive framework, possibly due to multicollinearity among these spatially correlated variables.
+
+```{r}
+#| label: spatial-impacts
+
+# Direct, indirect, and total impacts for the SLM
+slm_impacts <- spatialreg::impacts(
+  obj      = Model2.SLM,
+  listw    = weights,
+  zero.policy = TRUE,
+  R        = 500
+)
+
+summary(slm_impacts, zstats = TRUE, short = TRUE)
+```
+
+# Discussion and Conclusions {#sec-conclusions}
+
+## Summary of Findings
+
+This study examined whether UTA-TRAX moderates social equity in Salt Lake County through a rigorous geospatial accessibility framework. Our findings can be summarized as follows:
+
+1. **Accessibility is spatially unequal.** The 2SFCA analysis demonstrates that TRAX accessibility is not identically distributed across Salt Lake County. Downtown Salt Lake City and Sugarhouse exhibit the highest accessibility scores, owing to dense station clustering and smaller block groups that facilitate pedestrian access.
+
+2. **Spatial clustering is significant.** Global Moran's I confirms strong positive spatial autocorrelation (I > 0, p < 0.001). LISA mapping identifies two major high-high clusters: one anchored in Salt Lake City's urban core and one in Draper, corresponding to the terminal stations of the Red Line.
+
+3. **Vehicle-free households are the primary equity signal.** Across all model specifications, the percentage of households with no vehicle is the only equity variable consistently and positively associated with TRAX accessibility. This finding supports the hypothesis that UTA-TRAX partially moderates equity for transit-dependent residents — but does not fully resolve the equity gap.
+
+4. **Other equity dimensions are not significantly served.** Race, ethnicity, income, and educational attainment are not independently predictive of accessibility in the spatial lag framework, after controlling for spatial dependency. This does not mean these groups are equitably served — it may reflect the limitation that the TRAX network was not designed with explicit equity mandates, and that spatial clustering masks group-specific disparities.
+
+## Policy Recommendations
+
+- **Expand pedestrian catchments.** Investments in sidewalk infrastructure, protected bike lanes, and first/last-mile connections (e.g., bike-share, micro-mobility) near TRAX stations in underserved southern and western Salt Lake County could significantly expand effective accessibility for equity populations.
+
+- **Targeted service frequency increases.** High-demand equity corridors — particularly areas with elevated concentrations of non-White residents and low-income households that currently fall outside the 20-minute catchment — should be candidates for new bus routes or more frequent TRAX service.
+
+- **Integrate Title VI monitoring.** UTA should adopt spatially explicit equity metrics, such as the 2SFCA accessibility index, into its ongoing Title VI compliance reporting, enabling proactive identification of disparities before they crystallize.
+
+- **Revisit the AMI threshold.** The income bracket proxy used here ($0–$59,999 for <80% AMI) may undercount households in the 60th–80th percentile of income. Future analyses should use the continuous income distribution from PUMS data for a more precise low-income definition.
+
+## Limitations
+
+Several limitations merit acknowledgment. First, the 20-minute walking isochrone threshold, while standard in the literature, may overestimate accessibility for elderly or mobility-impaired individuals. Second, the ORS isochrones assume flat terrain and a consistent pedestrian network — Salt Lake County's topographic variation along the Wasatch Front may introduce error. Third, the 2-year ACS window (2015–2019) predates COVID-19 pandemic disruptions to transit ridership, which fundamentally altered accessibility patterns. Finally, this analysis captures *spatial* accessibility but not *temporal* accessibility (i.e., frequency of service at different times of day).
+
+## Future Work
+
+Future research should: (1) incorporate GTFS-based temporal accessibility to capture off-peak and weekend service gaps; (2) apply the 2SFCA method to other transit modes (bus, FrontRunner commuter rail) for a system-wide equity picture; and (3) use longitudinal ACS data to track how accessibility equity has changed alongside TRAX network expansions.
+
+---
+
+*This analysis was conducted as part of CMP 6455 — Advanced GIS Applications, University of Utah, Department of City & Metropolitan Planning. The companion publication is available at [DOI: 10.1177/03611981231170005](https://doi.org/10.1177/03611981231170005).*
