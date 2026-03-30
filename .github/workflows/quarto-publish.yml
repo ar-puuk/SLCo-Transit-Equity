@@ -1,0 +1,114 @@
+# .github/workflows/quarto-publish.yml
+# Renders index.qmd to HTML + PDF (typst) on every push to main,
+# then deploys the HTML output to GitHub Pages.
+#
+# Setup required (one-time):
+#   1. In your repo Settings → Pages → Source: "GitHub Actions"
+#   2. In Settings → Secrets → Actions, add:
+#        CENSUS_API_KEY   — your tidycensus key
+#        ORS_API_KEY      — your OpenRouteService key
+#   3. The renv.lock in your repo root pins all R packages.
+
+name: Render & Publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:   # allows manual trigger from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+      ORS_API_KEY:    ${{ secrets.ORS_API_KEY }}
+      GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+      RENV_PATHS_ROOT: ~/.local/share/renv   # shared cache across runs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: "pre-release"   # pin to a specific version if preferred
+
+      - name: Install Typst (for PDF rendering)
+        run: quarto install tinytex --no-prompt || true
+        # Typst is bundled with Quarto ≥ 1.4; the above is a fallback
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4"
+          use-public-rspm: true    # binary CRAN packages → faster installs
+
+      - name: Cache renv library
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.RENV_PATHS_ROOT }}
+          key: ${{ runner.os }}-renv-${{ hashFiles('**/renv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-renv-
+
+      - name: Restore renv package environment
+        run: |
+          install.packages("renv")
+          renv::restore()
+        shell: Rscript {0}
+
+      - name: Install system libraries for sf / spdep
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libgdal-dev libgeos-dev libproj-dev libudunits2-dev \
+            libsqlite3-dev libcurl4-openssl-dev libssl-dev
+
+      - name: Write API keys to .Renviron
+        run: |
+          echo "CENSUS_API_KEY=${{ secrets.CENSUS_API_KEY }}" >> ~/.Renviron
+          echo "ORS_API_KEY=${{ secrets.ORS_API_KEY }}"       >> ~/.Renviron
+
+      - name: Render HTML
+        run: quarto render index.qmd --to html --output-dir docs
+
+      - name: Render PDF (Typst)
+        run: quarto render index.qmd --to typst --output-dir docs
+        continue-on-error: true   # don't fail the whole job if PDF breaks
+
+      - name: Render DOCX
+        run: quarto render index.qmd --to docx --output-dir docs
+        continue-on-error: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only deploy on pushes to main, not on PRs
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

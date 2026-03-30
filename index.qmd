@@ -5,12 +5,16 @@ author:
   - name: Faria Afrin Zinia
     affiliations:
       - name: University of Utah, Department of City & Metropolitan Planning
-  - name: Justice Prosper Tuffour
-    affiliations:
-      - name: University of Utah, Department of City & Metropolitan Planning
   - name: Pukar Bhandari
     affiliations:
       - name: University of Utah, Department of City & Metropolitan Planning
+  - name: Justice Prosper Tuffour
+    affiliations:
+      - name: University of Utah, Department of City & Metropolitan Planning
+  - name: Andy Hong
+    affiliations:
+      - name: University of Utah, Department of City & Metropolitan Planning
+      - name: University of Utah, Healthy Aging and Resilient Places Lab
 date: "2022-05-04"
 date-format: long
 description: |
@@ -483,8 +487,17 @@ trax_catchment <- trax_iso |>
   ) |>
   st_transform(3566)
 
-# Create block group centroids for spatial join
-blockgrp_centroid <- slco_blockgrp |> st_centroid()
+# Block group centroids — save to processed/ on first run, load thereafter
+blockgrp_centroid_path <- file.path(path_proc, "blockgrp_centroid.shp")
+
+if (!file.exists(blockgrp_centroid_path)) {
+  blockgrp_centroid <- slco_blockgrp |> st_centroid()
+  st_write(blockgrp_centroid, blockgrp_centroid_path, quiet = TRUE)
+  message("Block group centroids computed and saved.")
+} else {
+  blockgrp_centroid <- st_read(blockgrp_centroid_path, quiet = TRUE)
+  message("Block group centroids loaded from disk.")
+}
 
 # Spatial join: catchment polygon ∩ block group centroids → supply ratio
 supply_ratio <- st_join(trax_catchment, blockgrp_centroid, left = FALSE) |>
@@ -592,30 +605,33 @@ if (!file.exists(blockgrp_iso_path)) {
 ```{r}
 #| label: compute-2sfca
 
-# Attach block group attributes to demand catchment isochrones
-pop_catchment <- blockgrp_iso_combined |>
-  mutate(
-    GEOID     = blockgrp_centroid$GEOID,
-    total_pop = blockgrp_centroid$total_popE
-  ) |>
-  st_transform(3566)
-
-# Spatial join: demand catchment ∩ supply ratios → accessibility score
-supply_demand_ratio <- st_join(pop_catchment, trax_to_pop) |>
-  group_by(GEOID) |>
-  summarise(
-    access1 = sum(supply_ratio1, na.rm = TRUE),  # Capacity-based 2SFCA
-    access2 = sum(supply_ratio2, na.rm = TRUE)   # Ridership-based 2SFCA
-  ) |>
-  st_drop_geometry()
-
-# Merge accessibility scores back into block group polygon layer
-TSFCA_network <- left_join(slco_blockgrp, supply_demand_ratio, by = "GEOID")
-
-# Save for reuse
 tsfca_path <- file.path(path_proc, "TSFCA_Network.shp")
+
 if (!file.exists(tsfca_path)) {
+  # Attach block group attributes to demand catchment isochrones
+  pop_catchment <- blockgrp_iso_combined |>
+    mutate(
+      GEOID     = blockgrp_centroid$GEOID,
+      total_pop = blockgrp_centroid$total_popE
+    ) |>
+    st_transform(3566)
+
+  # Spatial join: demand catchment ∩ supply ratios → accessibility score
+  supply_demand_ratio <- st_join(pop_catchment, trax_to_pop) |>
+    group_by(GEOID) |>
+    summarise(
+      access1 = sum(supply_ratio1, na.rm = TRUE),  # Capacity-based 2SFCA
+      access2 = sum(supply_ratio2, na.rm = TRUE)   # Ridership-based 2SFCA
+    ) |>
+    st_drop_geometry()
+
+  # Merge accessibility scores back into block group polygon layer
+  TSFCA_network <- left_join(slco_blockgrp, supply_demand_ratio, by = "GEOID")
   st_write(TSFCA_network, tsfca_path, quiet = TRUE)
+  message("2SFCA accessibility computed and saved.")
+} else {
+  TSFCA_network <- st_read(tsfca_path, quiet = TRUE)
+  message("TSFCA_Network loaded from disk.")
 }
 ```
 
@@ -912,27 +928,32 @@ Local Indicators of Spatial Association (LISA) decompose the global statistic to
 ```{r}
 #| label: compute-lisa
 
-LISA <- TSFCA_network |>
-  mutate(
-    moran_p = localmoran(access1, listw = weights,
-                         zero.policy = TRUE)[, 5],
-    zscore  = as.numeric(scale(access1)),
-    lagged  = lag.listw(zscore, x = weights),
-    LISA    = if_else(
-      zscore >= 0 & lagged >= 0 & moran_p <= 0.05,
-      "High-High Cluster",
-      "No Significant Cluster"
+lisa_path <- file.path(path_proc, "LISA.shp")
+
+if (!file.exists(lisa_path)) {
+  LISA <- TSFCA_network |>
+    mutate(
+      moran_p = localmoran(access1, listw = weights,
+                           zero.policy = TRUE)[, 5],
+      zscore  = as.numeric(scale(access1)),
+      lagged  = lag.listw(zscore, x = weights),
+      LISA    = if_else(
+        zscore >= 0 & lagged >= 0 & moran_p <= 0.05,
+        "High-High Cluster",
+        "No Significant Cluster"
+      )
     )
-  )
+  st_write(LISA, lisa_path, quiet = TRUE)
+  message("LISA clusters computed and saved.")
+} else {
+  LISA <- st_read(lisa_path, quiet = TRUE)
+  message("LISA loaded from disk.")
+}
 
 cat(glue(
   "High-High Clusters: {sum(LISA$LISA == 'High-High Cluster', na.rm=TRUE)}\n",
-  "No Cluster: {sum(LISA$LISA == 'No Significant Cluster', na.rm=TRUE)}\n"
+  "No Cluster:         {sum(LISA$LISA == 'No Significant Cluster', na.rm=TRUE)}\n"
 ))
-
-# Save for external use
-lisa_path <- file.path(path_proc, "LISA.shp")
-if (!file.exists(lisa_path)) st_write(LISA, lisa_path, quiet = TRUE)
 ```
 
 ## LISA Cluster Map
