@@ -6,7 +6,7 @@ A reproducible GIS-based accessibility analysis using the Two-Step Floating Catc
 
 [![Render & Publish](https://github.com/ar-puuk/SLCo-Transit-Equity/actions/workflows/quarto-publish.yml/badge.svg)](https://github.com/ar-puuk/SLCo-Transit-Equity/actions/workflows/quarto-publish.yml)
 
-📄 **Published Article:** Zinia, F.A., Tuffour, J.P., & Bhandari, P. (2023). Transit Equity in Salt Lake County. *Transportation Research Record*, 2677(11), 296–311. [DOI: 10.1177/03611981231170005](https://doi.org/10.1177/03611981231170005)
+📄 **Published Article:** Zinia, F. A., Bhandari, P., Tuffour, J. P., & Hong, A. (2023). Evaluating Social Equity of Transit Accessibility: A Case of Salt Lake County, U.S. Transportation Research Record: Journal of the Transportation Research Board, 2677(12), 806-814. [DOI: 10.1177/03611981231170005](https://doi.org/10.1177/03611981231170005)
 
 🌐 **Live Report:** [ar-puuk.github.io/SLCo-Transit-Equity](https://ar-puuk.github.io/SLCo-Transit-Equity)
 
@@ -154,15 +154,18 @@ The QGIS2Web Leaflet exports in `maps/` are embedded in the HTML report as ifram
 ## Citation
 
 ```bibtex
-@article{zinia2023transit,
-  author  = {Zinia, Faria Afrin and Bhandari, Pukar and Tuffour, Justice Prosper and Hong, Andy },
-  title   = {Evaluating Social Equity of Transit Accessibility: A Case of Salt Lake County, U.S.},
-  journal = {Transportation Research Record},
-  year    = {2023},
-  volume  = {2677},
-  number  = {11},
-  pages   = {296--311},
-  doi     = {10.1177/03611981231170005}
+@article{doi:10.1177/03611981231170005,
+author = {Faria Afrin Zinia and Pukar Bhandari and Justice Prosper Tuffour and Andy Hong},
+title = {Evaluating Social Equity of Transit Accessibility: A Case of Salt Lake County, U.S.},
+journal = {Transportation Research Record},
+volume = {2677},
+number = {12},
+pages = {806-814},
+year = {2023},
+doi = {10.1177/03611981231170005},
+URL = {https://doi.org/10.1177/03611981231170005},
+eprint = {https://doi.org/10.1177/03611981231170005},
+abstract = { Addressing social equity in public transportation remains a key challenge for many cities and planning organizations. In this study, we examined social equity dimensions of accessibility to light rail transit (LRT) stations in Salt Lake County, U.S., by employing two novel methods. First, we used the two-step floating catchment area (2SFCA) method to examine the interactions between the demand and supply of the public transit service. Second, we developed geospatial models to account for spatial bias in transit equity analysis. Results showed little evidence of inequitable access to LRT stations in Salt Lake County. The accessibility to LRT stations appeared to be generally higher in the downtown and transit catchment areas with a higher concentration of low-income and ethnic minority populations. Furthermore, we found statistically significant associations between higher transit accessibility and households which are not homeowners, and/or do not own a private motor vehicle. Our findings suggest that transit investments in Salt Lake County could leverage substantial transportation accessibility opportunities to achieve an equitable and sustainable future. }
 }
 ```
 
