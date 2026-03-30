@@ -54,6 +54,7 @@ format:
       - text: "Published Article (TRR)"
         icon: journal-richtext
         href: "https://doi.org/10.1177/03611981231170005"
+prefer-html: true
 ---
 
 ```{r}
