@@ -44,10 +44,10 @@ citation:
   doi: "10.1177/03611981231170005"
   url: "https://doi.org/10.1177/03611981231170005"
   volume: 2677
-  issue: 11
-  page: "296–311"
+  issue: 12
+  page: "806-814"
   issued: 2023
-bibliography: references.bib
+bibliography: references/references.bib
 format:
   html:
     other-links:
@@ -66,38 +66,25 @@ format:
 # ===========================================================================
 
 # Core spatial & data wrangling
-# install.packages("tidyverse")
-# install.packages("tidycensus")
-# install.packages("sf")
-# install.packages("tigris")
-# install.packages("rmapshaper")
+# install.packages(c("tidyverse", "tidycensus", "sf", "tigris"))
 
-# Routing / Isochrones (ORS)
+# Routing / Isochrones (ORS — GitHub only)
 # install.packages("remotes")
 # remotes::install_github("GIScience/openrouteservice-r")
 
-# Visualization – interactive
-# install.packages("mapgl")      # MapLibre GL bindings (HTML maps)
-# install.packages("leaflet")
+# Visualization — interactive (HTML)
+# install.packages("mapgl")       # MapLibre GL via walker-data/mapgl
 
-# Visualization – static & publication
-# install.packages("ggplot2")    # bundled with tidyverse
-# install.packages("ggpubr")
-# install.packages("scales")
+# Visualization — static (all formats)
+# install.packages(c("ggpubr", "scales", "ggspatial"))
 
 # Spatial statistics
-# install.packages("spdep")
-# install.packages("spatialreg")
-# install.packages("matrixStats")
+# install.packages(c("spdep", "spatialreg", "classInt"))
 
 # Tables & model output
-# install.packages("gtsummary")
-# install.packages("gt")
-# install.packages("broom")
-# install.packages("knitr")
+# install.packages(c("gtsummary", "gt", "broom", "knitr"))
 
-# Misc
-# install.packages("car")
+# Utilities
 # install.packages("glue")
 ```
 
@@ -108,19 +95,18 @@ library(tidyverse)
 library(tidycensus)
 library(sf)
 library(tigris)
-library(rmapshaper)
-library(openrouteservice)
-library(mapgl)         # Interactive GL maps (HTML output)
+library(openrouteservice)  # ORS isochrones (GitHub: GIScience/openrouteservice-r)
+library(mapgl)             # Interactive MapLibre GL maps (HTML output)
+library(classInt)          # Jenks breaks for map classification
 library(ggpubr)
 library(scales)
+library(ggspatial)         # annotation_scale / annotation_north_arrow
 library(spdep)
 library(spatialreg)
-library(matrixStats)
 library(gtsummary)
 library(gt)
 library(broom)
 library(knitr)
-library(car)
 library(glue)
 
 options(tigris_use_cache = TRUE)
@@ -435,41 +421,43 @@ Higher values of $A_i$ indicate greater transit accessibility.
 
 ## Step 1: TRAX Station Isochrones (Supply Catchments)
 
-Isochrones are computed via the [OpenRouteService](https://openrouteservice.org/) API using 20-minute foot-walking travel time. To avoid redundant API calls, results are cached to disk.
+TRAX station isochrones (20-minute foot-walking, 57 stations) are stored in
+`data/processed/trax_iso.shp` and loaded directly from disk. The ORS fallback
+only runs if the file is missing.
 
 ```{r}
 #| label: trax-isochrones
-#| cache: true
 
 trax_iso_path <- file.path(path_proc, "trax_iso.shp")
 
-if (!file.exists(trax_iso_path)) {
-  # Extract station coordinates (EPSG:4326 required by ORS)
+if (file.exists(trax_iso_path)) {
+  trax_iso <- st_read(trax_iso_path, quiet = TRUE)
+  message(glue("trax_iso loaded from disk ({nrow(trax_iso)} features)."))
+
+} else {
+  message("trax_iso.shp not found — running ORS API fallback.")
+
   trax_coords <- trax_stn |>
     st_transform(4326) |>
     st_coordinates()
 
   output_trax <- tibble()
-
   for (i in seq_len(nrow(trax_coords))) {
     cat(glue("  → Isochrone {i}/{nrow(trax_coords)}: {trax_stn$STATIONNAM[i]}\n"))
     res <- ors_isochrones(
       locations = trax_coords[i, ],
-      range     = 20 * 60,    # 20 minutes in seconds
+      range     = 20 * 60,
       profile   = "foot-walking",
       output    = "sf"
     )
-    Sys.sleep(2)  # Respect ORS rate limit
+    Sys.sleep(2)
     output_trax <- bind_rows(output_trax, res)
   }
 
-  st_write(output_trax |> select(-center), trax_iso_path, quiet = TRUE)
-  message("TRAX isochrones computed and saved.")
-} else {
-  message("Loading cached TRAX isochrones from disk.")
+  trax_iso <- output_trax |> select(-any_of("center"))
+  st_write(trax_iso, trax_iso_path, quiet = TRUE)
+  message("trax_iso computed and saved.")
 }
-
-trax_iso <- st_read(trax_iso_path, quiet = TRUE)
 ```
 
 ```{r}
@@ -487,19 +475,12 @@ trax_catchment <- trax_iso |>
   ) |>
   st_transform(3566)
 
-# Block group centroids — save to processed/ on first run, load thereafter
-blockgrp_centroid_path <- file.path(path_proc, "blockgrp_centroid.shp")
+# Block group centroids — always recomputed from slco_blockgrp in memory.
+# Saving centroids to .shp would truncate long ACS column names (10-char limit),
+# breaking downstream summarise() calls that reference e.g. total_popE.
+blockgrp_centroid <- slco_blockgrp |> st_centroid()
 
-if (!file.exists(blockgrp_centroid_path)) {
-  blockgrp_centroid <- slco_blockgrp |> st_centroid()
-  st_write(blockgrp_centroid, blockgrp_centroid_path, quiet = TRUE)
-  message("Block group centroids computed and saved.")
-} else {
-  blockgrp_centroid <- st_read(blockgrp_centroid_path, quiet = TRUE)
-  message("Block group centroids loaded from disk.")
-}
-
-# Spatial join: catchment polygon ∩ block group centroids → supply ratio
+# Spatial join: TRAX catchment polygons ∩ block group centroids → supply ratio
 supply_ratio <- st_join(trax_catchment, blockgrp_centroid, left = FALSE) |>
   group_by(OBJECTID) |>
   summarise(
@@ -516,87 +497,54 @@ trax_to_pop <- left_join(trax_stn, supply_ratio, by = "OBJECTID") |>
 
 ## Step 2: Block Group Isochrones (Demand Catchments)
 
-For block group centroids, the isochrone computation is split into two batches to manage API rate limits. Both batches are cached.
+The block group isochrones were pre-computed via the OpenRouteService API
+(~670 walking-time polygons, 20-minute threshold) and are stored in
+`data/processed/blockgrp_iso.shp`. They are loaded directly from disk.
+If the file is ever missing, the fallback loop below will regenerate it —
+but under normal circumstances that branch never executes.
 
 ```{r}
-#| label: blockgrp-coordinates
-
-blockgrp_coords <- blockgrp_centroid |>
-  st_transform(4326) |>
-  st_coordinates()
-```
-
-```{r}
-#| label: blockgrp-isochrones-batch1
-#| cache: true
-
-iso_batch1_path <- file.path(path_proc, "blockgrp_iso_batch1.shp")
-
-if (!file.exists(iso_batch1_path)) {
-  output1 <- tibble()
-  n_batch1 <- min(350, nrow(blockgrp_coords))
-
-  for (i in seq_len(n_batch1)) {
-    cat(glue("  → Block group isochrone {i}/{n_batch1}\n"))
-    res <- ors_isochrones(
-      locations = blockgrp_coords[i, ],
-      range     = 20 * 60,
-      profile   = "foot-walking",
-      output    = "sf"
-    )
-    Sys.sleep(2)
-    output1 <- bind_rows(output1, res)
-  }
-
-  st_write(output1 |> select(-center), iso_batch1_path, quiet = TRUE)
-  message("Batch 1 complete and saved.")
-} else {
-  message("Loading cached block group isochrones (batch 1).")
-}
-```
-
-```{r}
-#| label: blockgrp-isochrones-batch2
-#| cache: true
-
-iso_batch2_path <- file.path(path_proc, "blockgrp_iso_batch2.shp")
-
-if (!file.exists(iso_batch2_path)) {
-  output2 <- tibble()
-  idx_start <- 351
-  idx_end   <- nrow(blockgrp_coords)
-
-  for (i in idx_start:idx_end) {
-    cat(glue("  → Block group isochrone {i}/{idx_end}\n"))
-    res <- ors_isochrones(
-      locations = blockgrp_coords[i, ],
-      range     = 20 * 60,
-      profile   = "foot-walking",
-      output    = "sf"
-    )
-    Sys.sleep(2)
-    output2 <- bind_rows(output2, res)
-  }
-
-  st_write(output2 |> select(-center), iso_batch2_path, quiet = TRUE)
-  message("Batch 2 complete and saved.")
-} else {
-  message("Loading cached block group isochrones (batch 2).")
-}
-```
-
-```{r}
-#| label: combine-blockgrp-isochrones
+#| label: blockgrp-isochrones
 
 blockgrp_iso_path <- file.path(path_proc, "blockgrp_iso.shp")
 
-if (!file.exists(blockgrp_iso_path)) {
-  iso1 <- st_read(iso_batch1_path, quiet = TRUE)
-  iso2 <- st_read(iso_batch2_path, quiet = TRUE)
-  blockgrp_iso_combined <- bind_rows(iso1, iso2)
-  st_write(blockgrp_iso_combined, blockgrp_iso_path, quiet = TRUE)
-} else {
+if (file.exists(blockgrp_iso_path)) {
+  # Normal path: file already committed to data/processed/
   blockgrp_iso_combined <- st_read(blockgrp_iso_path, quiet = TRUE)
+  message(glue("blockgrp_iso loaded from disk ({nrow(blockgrp_iso_combined)} features)."))
+
+} else {
+  # Fallback: recompute via ORS API (requires a valid ORS API key).
+  # Runs in two batches to respect the API's per-minute rate limit.
+  message("blockgrp_iso.shp not found — running ORS API fallback (this takes ~30 min).")
+
+  blockgrp_coords <- blockgrp_centroid |>
+    st_transform(4326) |>
+    st_coordinates()
+
+  run_batch <- function(idx) {
+    out <- tibble()
+    for (i in idx) {
+      cat(glue("  → Block group isochrone {i}/{max(idx)}\n"))
+      res <- ors_isochrones(
+        locations = blockgrp_coords[i, ],
+        range     = 20 * 60,
+        profile   = "foot-walking",
+        output    = "sf"
+      )
+      Sys.sleep(2)
+      out <- bind_rows(out, res)
+    }
+    out
+  }
+
+  output1 <- run_batch(seq_len(min(350, nrow(blockgrp_coords))))
+  output2 <- run_batch(seq(351, nrow(blockgrp_coords)))
+
+  blockgrp_iso_combined <- bind_rows(output1, output2)
+  st_write(blockgrp_iso_combined |> select(-any_of("center")),
+           blockgrp_iso_path, quiet = TRUE)
+  message("blockgrp_iso computed and saved.")
 }
 ```
 
@@ -605,7 +553,9 @@ if (!file.exists(blockgrp_iso_path)) {
 ```{r}
 #| label: compute-2sfca
 
-tsfca_path <- file.path(path_proc, "TSFCA_Network.shp")
+# Use .rds (not .shp) to preserve all long ACS column names needed for
+# regression (shapefile truncates field names to 10 characters).
+tsfca_path <- file.path(path_proc, "TSFCA_Network.rds")
 
 if (!file.exists(tsfca_path)) {
   # Attach block group attributes to demand catchment isochrones
@@ -627,10 +577,10 @@ if (!file.exists(tsfca_path)) {
 
   # Merge accessibility scores back into block group polygon layer
   TSFCA_network <- left_join(slco_blockgrp, supply_demand_ratio, by = "GEOID")
-  st_write(TSFCA_network, tsfca_path, quiet = TRUE)
+  saveRDS(TSFCA_network, tsfca_path)
   message("2SFCA accessibility computed and saved.")
 } else {
-  TSFCA_network <- st_read(tsfca_path, quiet = TRUE)
+  TSFCA_network <- readRDS(tsfca_path)
   message("TSFCA_Network loaded from disk.")
 }
 ```
@@ -641,23 +591,33 @@ The 2SFCA accessibility surface reveals pronounced spatial heterogeneity across 
 
 Conversely, the southern reaches of the county (Draper, portions of Sandy and South Jordan) show lower accessibility despite being served by the Red Line, owing to lower station density and larger block groups requiring longer walks to reach stations.
 
-## Interactive Map (2SFCA Accessibility)
+```{r}
+#| label: map-setup
+
+# Shared objects used by both the interactive and static maps.
+# Defined once here so they are available throughout this section and
+# in the LISA mapping section below.
+slco_county <- tigris::counties(state = "UT", year = 2019, cb = TRUE) |>
+  filter(NAME == "Salt Lake") |>
+  st_transform(3566)
+
+TSFCA_wgs84    <- TSFCA_network |> st_transform(4326)
+trax_stn_wgs84 <- trax_stn      |> st_transform(4326)
+```
 
 ::: {.content-visible when-format="html"}
 
 ```{r}
 #| label: fig-map-2sfca-html
-#| fig-cap: "Interactive map of 2SFCA transit accessibility scores across Salt Lake County block groups. Darker shading indicates higher accessibility."
+#| fig-cap: "Interactive map of 2SFCA transit accessibility scores across Salt Lake County block groups."
 
-# Reproject to WGS84 for web mapping
-TSFCA_wgs84 <- TSFCA_network |> st_transform(4326)
-trax_stn_wgs84 <- trax_stn |> st_transform(4326)
-
-# Build accessibility color palette (Reds, Jenks 5 breaks)
-access_breaks <- classInt::classIntervals(
-  TSFCA_wgs84$access1,
-  n = 5, style = "jenks"
-)$brks
+# Define the Jenks classification natively via mapgl
+jenks_fill <- step_jenks(
+  data    = TSFCA_wgs84,
+  column  = "access1",
+  colors  = c("#fff5f0", "#fc9272", "#fb6a4a", "#de2d26", "#a50f15"),
+  n       = 5
+)
 
 maplibre(
   style  = carto_style("positron"),
@@ -665,70 +625,56 @@ maplibre(
   zoom   = 10
 ) |>
   add_fill_layer(
-    id     = "2sfca-fill",
-    source = TSFCA_wgs84,
-    fill_color = step_expr(
-      column = "access1",
-      base   = "#fff5f0",
-      stops  = list(
-        access_breaks[2] ~ "#fc9272",
-        access_breaks[3] ~ "#fb6a4a",
-        access_breaks[4] ~ "#de2d26",
-        access_breaks[5] ~ "#a50f15"
-      )
-    ),
-    fill_opacity = 0.75
+    id           = "2sfca-fill",
+    source       = TSFCA_wgs84,
+    fill_color   = jenks_fill$expression,
+    fill_opacity = 0.75,
+    tooltip      = "Accessibility: {access1}"
   ) |>
   add_line_layer(
-    id             = "2sfca-outline",
-    source         = TSFCA_wgs84,
-    line_color     = "#ffffff",
-    line_width     = 0.3,
-    line_opacity   = 0.5
+    id           = "2sfca-outline",
+    source       = TSFCA_wgs84,
+    line_color   = "#ffffff",
+    line_width   = 0.3,
+    line_opacity = 0.5
   ) |>
   add_circle_layer(
-    id            = "trax-stations",
-    source        = trax_stn_wgs84,
-    circle_color  = "#0057b8",
-    circle_radius = 5,
+    id                  = "trax-stations",
+    source              = trax_stn_wgs84,
+    circle_color        = "#0057b8",
+    circle_radius       = 5,
     circle_stroke_color = "#ffffff",
     circle_stroke_width = 1.5
   ) |>
-  add_tooltip("2sfca-fill",
-    glue_expr = "GEOID: {GEOID}<br>Accessibility: {round(access1, 3)}") |>
   add_legend(
-    legend_title = "2SFCA Accessibility",
-    values       = round(access_breaks, 2),
-    colors       = c("#fff5f0","#fc9272","#fb6a4a","#de2d26","#a50f15")
+    legend_title   = "2SFCA Accessibility",
+    type           = "categorical",
+    layer_id       = "2sfca-fill",
+    classification = jenks_fill,
+    interactive    = TRUE
   )
 ```
 
 :::
 
-## Static Map (2SFCA Accessibility)
-
 ::: {.content-visible unless-format="html"}
 
 ```{r}
 #| label: fig-map-2sfca-static
-#| fig-cap: "2SFCA transit accessibility scores across Salt Lake County block groups (Jenks classification). TRAX stations shown as blue dots."
+#| fig-cap: "2SFCA transit accessibility scores across Salt Lake County block groups (Jenks classification, 5 classes). TRAX stations shown as blue points."
 #| fig-width: 8
 #| fig-height: 7
-
-slco_county <- tigris::counties(state = "UT", year = 2019, cb = TRUE) |>
-  filter(NAME == "Salt Lake") |>
-  st_transform(3566)
 
 ggplot() +
   geom_sf(data = TSFCA_network, aes(fill = access1), color = NA) +
   geom_sf(data = slco_county, fill = NA, color = "black", linewidth = 0.6) +
   geom_sf(data = trax_stn, color = "#0057b8", size = 1.2) +
   scale_fill_distiller(
-    palette  = "Reds",
+    palette   = "Reds",
     direction = 1,
-    na.value = "grey85",
-    name     = "2SFCA\nAccessibility",
-    labels   = scales::label_number(accuracy = 0.01)
+    na.value  = "grey85",
+    name      = "2SFCA\nAccessibility",
+    labels    = scales::label_number(accuracy = 0.01)
   ) +
   annotation_scale(location = "bl") +
   annotation_north_arrow(location = "tr", style = north_arrow_minimal()) +
@@ -739,40 +685,9 @@ ggplot() +
   ) +
   theme_minimal(base_size = 11) +
   theme(
-    plot.title    = element_text(face = "bold"),
+    plot.title      = element_text(face = "bold"),
     legend.position = "right"
   )
-```
-
-:::
-
-::: {.content-visible when-format="html"}
-
-```{r}
-#| label: fig-map-2sfca-static-html
-#| fig-cap: "Static 2SFCA accessibility map — Salt Lake County."
-
-slco_county <- tigris::counties(state = "UT", year = 2019, cb = TRUE) |>
-  filter(NAME == "Salt Lake") |>
-  st_transform(3566)
-
-ggplot() +
-  geom_sf(data = TSFCA_network, aes(fill = access1), color = NA) +
-  geom_sf(data = slco_county, fill = NA, color = "black", linewidth = 0.6) +
-  geom_sf(data = trax_stn, color = "#0057b8", size = 1.2) +
-  scale_fill_distiller(
-    palette   = "Reds",
-    direction = 1,
-    na.value  = "grey85",
-    name      = "2SFCA\nAccessibility"
-  ) +
-  labs(
-    title    = "UTA TRAX Accessibility in Salt Lake County",
-    subtitle = "2-Step Floating Catchment Area (2SFCA) Index",
-    caption  = "Data: ACS 2015–2019, UGRC, OpenRouteService"
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(plot.title = element_text(face = "bold"))
 ```
 
 :::
@@ -837,6 +752,12 @@ We use **Queen's contiguity** to define neighbors — two block groups are neigh
 ```{r}
 #| label: spatial-weights
 
+# Clean out NaN/NA values created by 0/0 division in ACS demographics
+# This MUST happen before building spatial weights to ensure perfect alignment
+TSFCA_network <- TSFCA_network |>
+  filter(if_all(c(access1, starts_with("p_")), ~ !is.na(.) & !is.nan(.)))
+
+# Now build the spatial weights on the clean dataset
 queen   <- poly2nb(TSFCA_network, queen = TRUE)
 weights <- nb2listw(neighbours = queen, style = "W", zero.policy = TRUE)
 
@@ -928,7 +849,9 @@ Local Indicators of Spatial Association (LISA) decompose the global statistic to
 ```{r}
 #| label: compute-lisa
 
-lisa_path <- file.path(path_proc, "LISA.shp")
+# Use .rds to preserve column names (LISA category string would survive .shp
+# but other inherited columns from TSFCA_network would be truncated).
+lisa_path <- file.path(path_proc, "LISA.rds")
 
 if (!file.exists(lisa_path)) {
   LISA <- TSFCA_network |>
@@ -943,10 +866,10 @@ if (!file.exists(lisa_path)) {
         "No Significant Cluster"
       )
     )
-  st_write(LISA, lisa_path, quiet = TRUE)
+  saveRDS(LISA, lisa_path)
   message("LISA clusters computed and saved.")
 } else {
-  LISA <- st_read(lisa_path, quiet = TRUE)
+  LISA <- readRDS(lisa_path)
   message("LISA loaded from disk.")
 }
 
@@ -975,33 +898,35 @@ maplibre(
     id     = "lisa-fill",
     source = LISA_wgs84,
     fill_color = match_expr(
-      column = "LISA",
-      values = list(
-        "High-High Cluster"        = "#e41a1c",
-        "No Significant Cluster"   = "#d9d9d9"
-      ),
+      column  = "LISA",
+      values  = c("High-High Cluster", "No Significant Cluster"),
+      stops   = c("#e41a1c", "#d9d9d9"),
       default = "#d9d9d9"
     ),
-    fill_opacity = 0.75
+    fill_opacity = 0.75,
+    tooltip      = "<b>LISA:</b> {LISA}"
   ) |>
   add_line_layer(
-    id           = "lisa-outline",
-    source       = LISA_wgs84,
-    line_color   = "#ffffff",
-    line_width   = 0.3
+    id         = "lisa-outline",
+    source     = LISA_wgs84,
+    line_color = "#ffffff",
+    line_width = 0.3
   ) |>
   add_circle_layer(
-    id            = "trax-stations-lisa",
-    source        = trax_stn_wgs84,
-    circle_color  = "#0057b8",
-    circle_radius = 5,
+    id                  = "trax-stations-lisa",
+    source              = trax_stn_wgs84,
+    circle_color        = "#0057b8",
+    circle_radius       = 5,
     circle_stroke_color = "#ffffff",
     circle_stroke_width = 1.5
   ) |>
-  add_legend(
-    legend_title = "LISA Cluster",
-    values       = c("High-High Cluster", "No Significant Cluster"),
-    colors       = c("#e41a1c", "#d9d9d9")
+  add_categorical_legend(
+    legend_title  = "LISA Cluster",
+    values        = c("High-High Cluster", "No Significant Cluster"),
+    colors        = c("#e41a1c", "#d9d9d9"),
+    layer_id      = "lisa-fill",
+    filter_column = "LISA",
+    interactive   = TRUE
   )
 ```
 
@@ -1011,22 +936,23 @@ maplibre(
 
 ```{r}
 #| label: fig-lisa-static
-#| fig-cap: "LISA cluster map — statistically significant High-High accessibility clusters (red) vs. non-clustered block groups (grey). TRAX stations shown as blue dots."
+#| fig-cap: "LISA cluster map — statistically significant High-High accessibility clusters (red) vs. non-clustered block groups (grey). TRAX stations shown as blue points."
 #| fig-width: 8
 #| fig-height: 7
 
 ggplot() +
-  geom_sf(data = LISA,
-          aes(fill = LISA), color = NA) +
+  geom_sf(data = LISA, aes(fill = LISA), color = NA) +
   geom_sf(data = slco_county, fill = NA, color = "black", linewidth = 0.6) +
   geom_sf(data = trax_stn, color = "#0057b8", size = 1.2) +
   scale_fill_manual(
     values = c(
-      "High-High Cluster"       = "#e41a1c",
-      "No Significant Cluster"  = "#d9d9d9"
+      "High-High Cluster"      = "#e41a1c",
+      "No Significant Cluster" = "#d9d9d9"
     ),
     name = "LISA Category"
   ) +
+  annotation_scale(location = "bl") +
+  annotation_north_arrow(location = "tr", style = north_arrow_minimal()) +
   labs(
     title    = "LISA Clusters of TRAX Accessibility",
     subtitle = "Local Indicator of Spatial Association (Queen Contiguity, p ≤ 0.05)",
@@ -1248,7 +1174,7 @@ bind_rows(tidy_slm, tidy_sem) |>
 
 ## Best Model: Spatial Lag Model Interpretation
 
-The Spatial Lag Model (AIC = `r round(AIC(Model2.SLM), 1)`) outperforms both OLS (AIC = `r round(AIC(Model1.OLS), 1)`) and the Spatial Error Model (AIC = `r round(AIC(Model3.SEM), 1)`), providing the most efficient fit to the data. The final model equation is:
+The Spatial Lag Model (AIC = `r round(-2 * Model2.SLM$LL + 2 * Model2.SLM$parameters, 1)`) outperforms both OLS (AIC = `r round(AIC(Model1.OLS), 1)`) and the Spatial Error Model (AIC = `r round(-2 * Model3.SEM$LL + 2 * Model3.SEM$parameters, 1)`), providing the most efficient fit to the data.
 
 $$\hat{A}_i = \rho \cdot W\hat{A}_i + 0.623 - 0.024 \cdot p_{Age} + 0.007 \cdot p_{HMOwnership} + 0.072 \cdot p_{VOwnership}$$
 

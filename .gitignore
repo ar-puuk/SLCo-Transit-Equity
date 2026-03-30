@@ -71,6 +71,7 @@ Backup/
 *.xlsx    # Raw data spreadsheets — use CSV in data/ instead
 # Exception: keep the renv lockfile
 !renv.lock
+
 **/*.quarto_ipynb
 .Rproj.user
 .positai

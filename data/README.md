@@ -29,7 +29,7 @@ are instant without any network call.
 
 ---
 
-## data/raw/ — External source files
+## data/raw/ — External source files (copy manually)
 
 These files were **obtained from outside this analysis** — from UGRC, UTA,
 or derived in QGIS as a pre-processing step before this R script was written.
@@ -85,29 +85,49 @@ They are committed so that subsequent renders (locally and on GitHub Actions)
 load from disk and skip all API calls.
 
 The `if (!file.exists(...))` guards in `index.qmd` enforce this: if the
-file exists on disk it is loaded with `st_read()`; otherwise the computation
-runs and the result is written with `st_write()`.
+file exists on disk it is loaded; otherwise the computation runs and the
+result is written.
+
+### File formats
+
+| Format | Why | Files |
+|--------|-----|-------|
+| `.shp` (+ sidecars) | Standard interchange format for pure geometry layers with simple column names | `trax_iso.*`, `blockgrp_iso.*` |
+| `.rds` | R's native binary format — **preserves all column names** (no 10-char truncation), CRS, and sf class | `TSFCA_Network.rds`, `LISA.rds` |
+
+> **Why not `.shp` for everything?** Shapefile field names are truncated to
+> 10 characters. `TSFCA_Network` and `LISA` inherit all the long ACS column
+> names from `slco_blockgrp` (e.g. `total_popE`, `pop_hispanicE`, `age1E`…).
+> Loading a `.shp` version of these would silently truncate those names and
+> break every downstream regression and correlation call. `.rds` has no such
+> limit and is faster to read/write.
+
+### Files to copy
 
 ```
-Files to copy from H:\...\Term Project\Data\   →   data/processed/
+Local project (H:\...\Term Project\Data\)    →   data/processed/
 ──────────────────────────────────────────────────────────────────────────────
-# Derived by st_centroid() from ACS block groups
-blockgrp_centroid.*                            →   data/processed/
+trax_iso.*          (.dbf .prj .shp .shx)    →   data/processed/
+blockgrp_iso.*      (.dbf .prj .shp .shx)    →   data/processed/
+```
 
-# ORS API isochrone loops (the expensive step — ~30 min to recompute)
-trax_iso.*                                     →   data/processed/
-blockgrp_iso.*                                 →   data/processed/
+For `TSFCA_Network` and `LISA`: these must be **re-saved as `.rds`** from your
+local R session before copying, because the files you have on disk are `.shp`
+(old format). Run this once locally:
 
-# 2SFCA accessibility surface (joined block groups + scores)
-TSFCA_Network.*                                →   data/processed/
+```r
+# Run in your local R session with the old .shp files available
+library(sf)
+library(tidycensus)
 
-# LISA cluster assignments
-LISA.*                                         →   data/processed/
+# Re-run the 2SFCA computation with slco_blockgrp in memory
+# (or load the .shp and re-join to slco_blockgrp to restore column names)
+# Then:
+saveRDS(TSFCA_network, "data/processed/TSFCA_Network.rds")
+saveRDS(LISA,          "data/processed/LISA.rds")
 ```
 
 ### If blockgrp_iso.shp exceeds 50 MB
-
-Run once to migrate it to Git LFS before your first push:
 
 ```bash
 git lfs install
@@ -115,6 +135,3 @@ git lfs track "data/processed/blockgrp_iso.shp"
 git lfs track "data/processed/blockgrp_iso.dbf"
 git add .gitattributes
 ```
-
-All subsequent `git push` and `git clone` operations will handle it
-transparently.

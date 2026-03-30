@@ -18,7 +18,8 @@ format:
     fig-height: 6
     df-print: paged
     embed-resources: true
-    css: styles.css
+    # styles.css is optional — create an empty file if you want custom CSS:
+    # css: styles.css
 
   typst:
     toc: true
@@ -37,7 +38,7 @@ format:
     number-sections: true
     fig-width: 7
     fig-height: 5
-    reference-doc: reference.docx
+    # reference-doc: reference.docx  # uncomment once you have a reference doc
     highlight-style: arrow
 
 execute:
