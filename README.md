@@ -75,8 +75,8 @@ Place all files in `data/raw/` before running the analysis.
 
 | File | Source | Notes |
 |------|--------|-------|
-| `LightRailStations_UTA_3566.shp` | [UGRC](https://gis.utah.gov/products/sgid/transportation/light-rail/) | UTA TRAX station points, reprojected to EPSG:3566 |
-| `LightRail_UTA_3566.shp` | [UGRC](https://gis.utah.gov/products/sgid/transportation/light-rail/) | UTA TRAX route lines, reprojected to EPSG:3566 |
+| `LightRailStations_UTA_3566.shp` | [UGRC](https://opendata.gis.utah.gov/datasets/utah::trax-light-rail-stations/about) | UTA TRAX station points, reprojected to EPSG:3566 |
+| `LightRail_UTA_3566.shp` | [UGRC](https://opendata.gis.utah.gov/datasets/utah::uta-trax-light-rail-routes/about) | UTA TRAX route lines, reprojected to EPSG:3566 |
 | ACS 2015–2019 (Block Group) | Retrieved via `tidycensus` | Automatically downloaded when you run `index.qmd` |
 
 The processed outputs (`data/processed/`) are generated automatically during rendering. The main computationally expensive step — generating ~670 walking isochrones via the OpenRouteService API — is cached to disk on first run and skipped on subsequent renders.
@@ -96,7 +96,7 @@ The processed outputs (`data/processed/`) are generated automatically during ren
 
 ```r
 # 1. Clone the repo
-#    git clone https://github.com/YOUR_USERNAME/SLCo-Transit-Equity.git
+#    git clone https://github.com/ar-puuk/SLCo-Transit-Equity.git
 
 # 2. Open SLCo-Transit-Equity.Rproj in RStudio
 
