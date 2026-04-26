@@ -48,12 +48,6 @@ citation:
   page: "806-814"
   issued: 2023
 bibliography: references/references.bib
-format:
-  html:
-    other-links:
-      - text: "Published Article (TRR)"
-        icon: journal-richtext
-        href: "https://doi.org/10.1177/03611981231170005"
 prefer-html: true
 ---
 
@@ -188,9 +182,11 @@ We use the ACS 5-year estimates (2015–2019) at the Census Block Group (CBG) le
 
 The full variable list spans race, ethnicity, age, income, employment, education, vehicle ownership, and housing tenure. @tbl-variables summarizes each equity indicator and its source variable(s).
 
+::: {.content-visible when-format="html"}
 ```{r}
-#| label: tbl-variables
+#| label: tbl-variables-html
 #| tbl-cap: "Social equity indicators, operational definitions, and ACS variable codes."
+#| eval: !expr knitr::is_html_output()
 #| echo: false
 
 tribble(
@@ -209,6 +205,30 @@ tribble(
   cols_align("left") |>
   opt_stylize(style = 6, color = "blue")
 ```
+:::
+
+::: {.content-visible unless-format="html"}
+```{r}
+#| label: tbl-variables-static
+#| tbl-cap: "Social equity indicators, operational definitions, and ACS variable codes."
+#| echo: false
+
+tribble(
+  ~`#`, ~Indicator,          ~`Operational Definition`,                                       ~`ACS Variable(s)`,
+  1L,   "Household Income",  "% households with income < 80% of Area Median ($74,865)",       "B19001_002–011",
+  2L,   "Race",              "% non-White population",                                         "B02001_003–008",
+  3L,   "Ethnicity",         "% Hispanic or Latino population",                                "B03003_003",
+  4L,   "Age",               "% population aged <18 or >65 (dependent age groups)",            "B01001_003–006, 020–025, 027–030, 044–049",
+  5L,   "Employment",        "% unemployed civilian labor force",                              "B23025_004–005",
+  6L,   "Education",         "% population ≥25 years with less than a high school diploma",   "B15003_002–016",
+  7L,   "Vehicle Ownership", "% households with no vehicle",                                  "B25044_003, 010",
+  8L,   "House Ownership",   "% renter-occupied households",                                  "B25003_003"
+) |>
+  gt() |>
+  tab_header(title = "Social Equity Indicators and ACS Sources") |>
+  cols_align("left")
+```
+:::
 
 ```{r}
 #| label: acs-download
@@ -365,9 +385,11 @@ slco_blockgrp <- slco_blockgrp |>
 
 ## Summary of Equity Indicators
 
+::: {.content-visible when-format="html"}
 ```{r}
-#| label: tbl-equity-summary
+#| label: tbl-equity-summary-html
 #| tbl-cap: "Descriptive statistics for the eight social equity indicators across Salt Lake County block groups."
+#| eval: !expr knitr::is_html_output()
 
 slco_blockgrp |>
   st_drop_geometry() |>
@@ -401,6 +423,45 @@ slco_blockgrp |>
   as_gt() |>
   opt_stylize(style = 6, color = "blue")
 ```
+:::
+
+::: {.content-visible unless-format="html"}
+```{r}
+#| label: tbl-equity-summary-static
+#| tbl-cap: "Descriptive statistics for the eight social equity indicators across Salt Lake County block groups."
+
+slco_blockgrp |>
+  st_drop_geometry() |>
+  select(
+    `Age (Dependent)`        = p_Age,
+    `Income (<80% AMI)`      = p_Income,
+    `Race (Non-White)`       = p_Race,
+    `Ethnicity (Hispanic)`   = p_Ethnicity,
+    `Employment (Unemployed)`= p_Employment,
+    `Education (No HS Dipl)` = p_Education,
+    `Vehicle-Free HH`        = p_VOwnership,
+    `Renter-Occupied HH`     = p_HMOwnership
+  ) |>
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{mean} ({sd}) [{min}–{max}]"),
+    digits    = all_continuous() ~ 1,
+    label     = list(
+      `Age (Dependent)`         ~ "Age: Dependent (<18 or >65) (%)",
+      `Income (<80% AMI)`       ~ "Household Income: <80% AMI (%)",
+      `Race (Non-White)`        ~ "Race: Non-White (%)",
+      `Ethnicity (Hispanic)`    ~ "Ethnicity: Hispanic/Latino (%)",
+      `Employment (Unemployed)` ~ "Employment: Unemployed (%)",
+      `Education (No HS Dipl)`  ~ "Education: No HS Diploma (%)",
+      `Vehicle-Free HH`         ~ "Vehicle Ownership: No Vehicle (%)",
+      `Renter-Occupied HH`      ~ "Housing: Renter-Occupied (%)"
+    ),
+    missing = "no"
+  ) |>
+  bold_labels() |>
+  modify_caption("**Descriptive Statistics — Social Equity Indicators**") |>
+  as_gt()
+```
+:::
 
 # Supply and Demand: TRAX Catchment Isochrones {#sec-catchment}
 
@@ -611,6 +672,7 @@ trax_stn_wgs84 <- trax_stn      |> st_transform(4326)
 ```{r}
 #| label: fig-map-2sfca-html
 #| fig-cap: "Interactive map of 2SFCA transit accessibility scores across Salt Lake County block groups."
+#| eval: !expr knitr::is_html_output()
 
 # Define the Jenks classification natively via mapgl
 jenks_fill <- step_jenks(
@@ -798,6 +860,13 @@ moran_mc <- moran.mc(TSFCA_network$access1,
                      listw     = weights,
                      nsim      = 999,
                      zero.policy = TRUE)
+```
+
+::: {.content-visible when-format="html"}
+```{r}
+#| label: tbl-moran-global-html
+#| tbl-cap: "Global Moran's I — TRAX Accessibility"
+#| eval: !expr knitr::is_html_output()
 
 tibble(
   Test       = c("Moran's I (parametric)", "Moran's I (Monte Carlo, 999 sim)"),
@@ -809,6 +878,23 @@ tibble(
   tab_header(title = "Global Moran's I — TRAX Accessibility") |>
   opt_stylize(style = 6, color = "blue")
 ```
+:::
+
+::: {.content-visible unless-format="html"}
+```{r}
+#| label: tbl-moran-global-static
+#| tbl-cap: "Global Moran's I — TRAX Accessibility"
+
+tibble(
+  Test       = c("Moran's I (parametric)", "Moran's I (Monte Carlo, 999 sim)"),
+  Statistic  = c(moran_test$statistic, moran_mc$statistic),
+  `p-value`  = c(moran_test$p.value, moran_mc$p.value)
+) |>
+  gt() |>
+  fmt_number(columns = c(Statistic, `p-value`), decimals = 4) |>
+  tab_header(title = "Global Moran's I — TRAX Accessibility")
+```
+:::
 
 ```{r}
 #| label: fig-moran-hist
@@ -887,6 +973,7 @@ cat(glue(
 ```{r}
 #| label: fig-lisa-html
 #| fig-cap: "Interactive LISA cluster map. Red polygons are statistically significant High-High accessibility clusters (p ≤ 0.05, Queen contiguity)."
+#| eval: !expr knitr::is_html_output()
 
 LISA_wgs84 <- LISA |> st_transform(4326)
 
@@ -1022,9 +1109,11 @@ lm.morantest(Model1.OLS, listw = weights, zero.policy = TRUE)
 
 ## Model 1: OLS Regression
 
+::: {.content-visible when-format="html"}
 ```{r}
-#| label: tbl-ols
+#| label: tbl-ols-html
 #| tbl-cap: "OLS regression results: 2SFCA accessibility regressed on eight social equity indicators."
+#| eval: !expr knitr::is_html_output()
 
 tbl_regression(
   Model1.OLS,
@@ -1051,6 +1140,38 @@ tbl_regression(
   as_gt() |>
   opt_stylize(style = 6, color = "blue")
 ```
+:::
+
+::: {.content-visible unless-format="html"}
+```{r}
+#| label: tbl-ols-static
+#| tbl-cap: "OLS regression results: 2SFCA accessibility regressed on eight social equity indicators."
+
+tbl_regression(
+  Model1.OLS,
+  label = list(
+    p_Race        ~ "Race: % Non-White",
+    p_Ethnicity   ~ "Ethnicity: % Hispanic",
+    p_Employment  ~ "Employment: % Unemployed",
+    p_Age         ~ "Age: % Dependent (<18 or >65)",
+    p_Education   ~ "Education: % Without HS Diploma",
+    p_HMOwnership ~ "Housing: % Renter-Occupied",
+    p_Income      ~ "Income: % HH <80% AMI",
+    p_VOwnership  ~ "Vehicle: % No-Car HH"
+  ),
+  intercept = TRUE,
+  estimate_fun = ~ style_sigfig(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) |>
+  add_glance_source_note(
+    include = c(r.squared, adj.r.squared, statistic, p.value, nobs)
+  ) |>
+  bold_p(t = 0.05) |>
+  bold_labels() |>
+  modify_caption("**Model 1: OLS Regression** — Dependent variable: 2SFCA Accessibility") |>
+  as_gt()
+```
+:::
 
 The OLS model explains only about `r round(summary(Model1.OLS)$adj.r.squared * 100, 1)`% of the variance in 2SFCA accessibility (Adjusted R² ≈ `r round(summary(Model1.OLS)$adj.r.squared, 3)`). Statistically significant predictors include the dependent age group percentage (negative), renter-occupied household percentage (positive), and vehicle-free household percentage (positive). Given the confirmed spatial autocorrelation, the OLS estimates are likely biased and inefficient.
 
@@ -1088,9 +1209,11 @@ Model3.SEM <- errorsarlm(
 
 ## Model Comparison
 
+::: {.content-visible when-format="html"}
 ```{r}
-#| label: tbl-model-comparison
+#| label: tbl-model-comparison-html
 #| tbl-cap: "Comparison of OLS, Spatial Lag Model (SLM), and Spatial Error Model (SEM) by AIC and Log-Likelihood."
+#| eval: !expr knitr::is_html_output()
 
 # Extract tidy coefficients for both spatial models
 tidy_slm <- broom::tidy(Model2.SLM) |>
@@ -1123,10 +1246,46 @@ tibble(
   ) |>
   opt_stylize(style = 6, color = "blue")
 ```
+:::
 
+::: {.content-visible unless-format="html"}
 ```{r}
-#| label: tbl-spatial-coefficients
+#| label: tbl-model-comparison-static
+#| tbl-cap: "Comparison of OLS, Spatial Lag Model (SLM), and Spatial Error Model (SEM) by AIC and Log-Likelihood."
+
+# Extract tidy coefficients for both spatial models
+tidy_slm <- broom::tidy(Model2.SLM) |>
+  mutate(model = "Spatial Lag (SLM)")
+
+tidy_sem <- broom::tidy(Model3.SEM) |>
+  mutate(model = "Spatial Error (SEM)")
+
+# AIC comparison table
+tibble(
+  Model           = c("OLS", "Spatial Lag (SLM)", "Spatial Error (SEM)"),
+  `Log-Likelihood`= c(logLik(Model1.OLS)[1],
+                       logLik(Model2.SLM)[1],
+                       logLik(Model3.SEM)[1]),
+  AIC             = c(AIC(Model1.OLS),
+                       AIC(Model2.SLM),
+                       AIC(Model3.SEM)),
+  `Adj. R² / Pseudo R²` = c(
+    summary(Model1.OLS)$adj.r.squared,
+    summary(Model2.SLM)$NK$NK,    # Nagelkerke pseudo-R²
+    summary(Model3.SEM)$NK$NK
+  )
+) |>
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
+  gt() |>
+  tab_header(title = "Model Performance Comparison")
+```
+:::
+
+::: {.content-visible when-format="html"}
+```{r}
+#| label: tbl-spatial-coefficients-html
 #| tbl-cap: "Coefficient estimates for the Spatial Lag and Spatial Error models."
+#| eval: !expr knitr::is_html_output()
 
 bind_rows(tidy_slm, tidy_sem) |>
   filter(!term %in% c("rho", "lambda")) |>
@@ -1172,6 +1331,52 @@ bind_rows(tidy_slm, tidy_sem) |>
   ) |>
   opt_stylize(style = 6, color = "blue")
 ```
+:::
+
+::: {.content-visible unless-format="html"}
+```{r}
+#| label: tbl-spatial-coefficients-static
+#| tbl-cap: "Coefficient estimates for the Spatial Lag and Spatial Error models."
+
+bind_rows(tidy_slm, tidy_sem) |>
+  filter(!term %in% c("rho", "lambda")) |>
+  select(model, term, estimate, std.error, statistic, p.value) |>
+  mutate(
+    term = recode(term,
+      `(Intercept)`  = "Intercept",
+      p_Race         = "Race: % Non-White",
+      p_Ethnicity    = "Ethnicity: % Hispanic",
+      p_Employment   = "Employment: % Unemployed",
+      p_Age          = "Age: % Dependent",
+      p_Education    = "Education: % Without HS Diploma",
+      p_HMOwnership  = "Housing: % Renter-Occupied",
+      p_Income       = "Income: % HH <80% AMI",
+      p_VOwnership   = "Vehicle: % No-Car HH"
+    ),
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      p.value < 0.10  ~ ".",
+      TRUE            ~ ""
+    )
+  ) |>
+  gt(groupname_col = "model") |>
+  fmt_number(columns = c(estimate, std.error, statistic), decimals = 4) |>
+  fmt_number(columns = p.value, decimals = 4) |>
+  cols_label(
+    term      = "Variable",
+    estimate  = "Estimate",
+    std.error = "Std. Error",
+    statistic = "z-value",
+    p.value   = "p-value",
+    sig       = ""
+  )
+```
+
+*Significance: \*\*\* p<0.001, \*\* p<0.01, \* p<0.05, . p<0.10*
+
+:::
 
 ## Best Model: Spatial Lag Model Interpretation
 

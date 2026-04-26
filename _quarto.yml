@@ -1,9 +1,12 @@
 project:
-  type: default
+  type: website
   output-dir: docs
   render:
     - "*.qmd"
     - "!6455_Term_Project - For Group.R"
+    
+website:
+  title: "SLCo Transit Equity"
 
 format:
   html:
@@ -23,8 +26,16 @@ format:
     embed-resources: true
     # styles.css is optional — create an empty file if you want custom CSS:
     # css: styles.css
+    other-links:
+      - text: "Published Article (TRR)"
+        icon: journal-richtext
+        href: "https://doi.org/10.1177/03611981231170005"
+      - text: "Preliminary Presentation"
+        icon: file-earmark-ppt-fill
+        href: "references/Preliminary Presentation.pptx"
 
   typst:
+    mainfont: "Arial"
     toc: true
     number-sections: true
     fig-width: 7
@@ -37,6 +48,7 @@ format:
       right: 1in
 
   docx:
+    mainfont: "Arial"
     toc: true
     number-sections: true
     fig-width: 7
@@ -48,11 +60,8 @@ execute:
   warning: false
   message: false
   echo: true
-  cache: true
 
 knitr:
   opts_chunk:
     collapse: true
     comment: "#>"
-    
-prefer-html: true
