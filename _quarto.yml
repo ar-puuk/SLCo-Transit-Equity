@@ -1,6 +1,9 @@
 project:
   type: default
   output-dir: docs
+  render:
+    - "*.qmd"
+    - "!6455_Term_Project - For Group.R"
 
 format:
   html:
