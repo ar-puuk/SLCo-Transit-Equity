@@ -4,6 +4,9 @@ project:
   render:
     - "*.qmd"
     - "!6455_Term_Project - For Group.R"
+  resources:
+    - "references/*.pdf"
+    - "references/*.pptx"
     
 website:
   title: "SLCo Transit Equity"
@@ -30,9 +33,12 @@ format:
       - text: "Published Article (TRR)"
         icon: journal-richtext
         href: "https://doi.org/10.1177/03611981231170005"
-      - text: "Preliminary Presentation"
+      - text: "Preliminary Presentation (view)"
+        icon: file-earmark-slides-fill
+        href: "references/Preliminary%20Presentation.pdf"
+      - text: "Preliminary Presentation (download .pptx)"
         icon: file-earmark-ppt-fill
-        href: "references/Preliminary Presentation.pptx"
+        href: "references/Preliminary%20Presentation.pptx"
 
   typst:
     mainfont: "Arial"
